@@ -12,7 +12,7 @@
 
 1. python环境需满足python3
 2. 需在电脑中安装谷歌浏览器
-3. 下载好后执行pip install requirements
+3. 下载好后执行pip install  -r requirements
 
 上述三点准备就绪后，执行下方命令可查看说明
 
