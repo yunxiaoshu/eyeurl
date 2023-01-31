@@ -137,11 +137,11 @@ def mainFunc(txt_path,timeout,wait_time,process_rate):
 
 if __name__=='__main__':
     if len(sys.argv)<2:
-        print('\n-------------欢迎使用本程序，帮助内容如下:------------\n  作者：云小书 参数说明:\n')
+        print('\n-------------欢迎使用本程序，帮助内容如下:------------\n  作者：云小书 公众号：恒运安全 参数说明:\n')
         print('\t-f\t\t需要探测的url所在的文件')
-        print('\t-thread\t\t线程数,默认10,建议不要太大')
+        print('\t-t\t\t线程数,默认10,建议不要太大')
         print('\t-delay\t\t网页延迟时间(s),默认0.5s,建议不要太大')
-        print('\t-timeout\t\t网页延迟时间(ms),默认300ms,建议不要太大')
+        print('\t-timeout\t\t网页延迟时间(s),默认3s,建议不要太大')
         print('\t挂代理请在cmd内执行(ip、端口自行更改)：set http_proxy=http://127.0.0.1:7890')
         sys.exit()
     import argparse
