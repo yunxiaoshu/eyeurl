@@ -1,6 +1,10 @@
 ## eyeurl使用说明
 
-### 开发说明
+### 程序说明
+
+本款工具在渗透测试乃至攻防演练中可快速打点信息收集来的网页界面，对其网页界面进行截图，整理成报告形式，方便使用者快速判断并筛选出脆弱的网站，示例图：
+
+![image-20230121162813727](https://testingcf.jsdelivr.net/gh/yunxiaoshu/images/image-20230121162813727.png)
 
 [eyeurl](https://github.com/yunxiaoshu/eyeurl)由作者：云小书 开发，源于日常渗透测试中，信息收集到的url过多，挨个打开查看比较繁琐，且效率极低，网上有大佬开发的[eyewitness](https://github.com/FortyNorthSecurity/EyeWitness/)，且ui布局各方面都比较完善，大家可以使用大佬开发的工具。
 
