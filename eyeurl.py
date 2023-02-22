@@ -34,13 +34,7 @@ def dir_mk(path):
     else:
         os.mkdir(path)
 
-def imgRename(url):
-    img_name = str(url).replace('/', '').replace('\\', '').replace('?', '').replace(':', '').replace('*', '').replace(
-        '\"', '').replace('|', '').replace('>', '').replace('<', '').replace('https', '').replace('http', '')
-    img_names.append(img_name)
-    return img_name
-
-def reqProcess(urlpaste,que,lock,m_dict,m_screenshots,dir_name,timeout,wait_time):
+def reqProcess(urlpaste,que,lock,m_dict,m_screenshots,timeout,wait_time):
     with lock:
         option = webdriver.ChromeOptions()
         option.add_argument('--window-size=1600,800')  # 设置option
@@ -53,12 +47,12 @@ def reqProcess(urlpaste,que,lock,m_dict,m_screenshots,dir_name,timeout,wait_time
     while True:
         if not que.empty():
             url = que.get()
-            img_name = imgRename(url)
-            req(urlpaste,url, header, img_name, driver, m_dict, m_screenshots,dir_name,timeout,wait_time)
+            num=que.qsize()+1
+            req(urlpaste,url, header, driver, m_dict, m_screenshots,timeout,wait_time,num)
         else:
             break
 
-def req(urlpaste,url,header,img_name,driver,m_dict,m_screenshots,dir_name,timeout,wait_time):
+def req(urlpaste,url,header,driver,m_dict,m_screenshots,timeout,wait_time,num):
     try:
         resp = urlpaste.req_get(url, verify=False, header=header,allow_redirects=False,timeout=timeout)
         if resp.status_code!=200:
@@ -72,21 +66,22 @@ def req(urlpaste,url,header,img_name,driver,m_dict,m_screenshots,dir_name,timeou
         driver.get(url)
         time.sleep(wait_time)
         img=driver.get_screenshot_as_png()
-        m_screenshots.update({'{0}/data/{1}.png'.format(dir_name, img_name): img})
+        img_path='{0}.png'.format(str(num))
+        m_screenshots.update({img_path: img})
         if res_title:
             print("[+] 已探测url:{0},状态码:{1},站点标题:{2}".format(url,status_code,soup.title.text))
-            m_dict.update({url:[resp.status_code, soup.title.text]})
+            m_dict.update({url:[resp.status_code, soup.title.text,img_path]})
         else:
             print("[+] 已探测url:{0},状态码:{1},站点标题:{2}".format(url, resp.status_code, '未获取到标题'))
-            m_dict.update({url: [resp.status_code,'未获取到标题']})
+            m_dict.update({url: [resp.status_code,'未获取到标题','']})
     except Exception as e:
         print("[x] 探测url:{0}失败:网站连接超时".format(url))
-        m_dict.update({url: ["连接失败",'未获取到标题']})
+        m_dict.update({url: ["连接失败",'未获取到标题','']})
 
 def report(m_dict,now_time):
     with open('result/result_{0}/result_{1}.txt'.format(now_time,now_time),'w',encoding='utf-8') as f:
-        for url,[resp_code,resp_title] in m_dict.items():
-            f.write('{0}\t{1}\t{2}\n'.format(url,resp_code,resp_title))
+        for url,[resp_code,resp_title,img_path] in m_dict.items():
+            f.write('{0}\t{1}\t{2}\t{3}\n'.format(url,resp_code,resp_title,'data/'+img_path))
         f.close()
     doc = dom.document(title='result_{0}'.format(now_time))
     with doc.head:
@@ -101,11 +96,11 @@ def report(m_dict,now_time):
             l += td('url详情')
             l += td('截图')
             # 插入表格数据
-            for url,[resp_code,resp_title] in m_dict.items():
+            for url,[resp_code,resp_title,img_path] in m_dict.items():
                 l = tr(align='center')
                 with l:
                     td(a(url,href=url,target="_blank"),' '+str(resp_code)+' '+resp_title)
-                    td(img(src='data/{0}.png'.format(imgRename(url)),style='width:800px;hight:200px'))
+                    td(img(src='data/{0}'.format(img_path),style='width:800px;hight:200px'))
     with open('result/result_{0}/result_{1}.html'.format(now_time,now_time),'w',encoding='utf-8') as f:
         f.write(doc.render())
         f.close()
@@ -125,7 +120,7 @@ def mainFunc(txt_path,timeout,wait_time,process_rate):
         process_rate=m_que.qsize()
     lock=m.Lock()
     for i in range(process_rate):
-        process=multiprocessing.Process(target=reqProcess,args=(urlpaste,m_que,lock,m_dict,m_screenshots,dir_name,timeout,wait_time))
+        process=multiprocessing.Process(target=reqProcess,args=(urlpaste,m_que,lock,m_dict,m_screenshots,timeout,wait_time))
         process_list.append(process)
     for i in process_list:
         i.start()
@@ -133,7 +128,7 @@ def mainFunc(txt_path,timeout,wait_time,process_rate):
         i.join()
     print('************url探测结束,请耐心等待报表生成~************\n')
     for key,value in m_screenshots.items():
-        with open(key, 'wb') as f:
+        with open(dir_name+'/data/'+key, 'wb') as f:
             f.write(value)
             f.close()
     print("报表生成完毕，报表所在位置:{0}".format(dir_name))
