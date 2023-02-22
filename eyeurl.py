@@ -147,8 +147,8 @@ if __name__=='__main__':
         print('\n-------------欢迎使用本程序，帮助内容如下:------------\n  作者：云小书 公众号：恒运安全 参数说明:\n')
         print('\t-f\t\t需要探测的url所在的文件')
         print('\t-t\t\t线程数,默认10,建议不要太大')
-        print('\t-delay\t\t网页截图等待时间(s),默认0.5s,建议不要太大')
-        print('\t-timeout\t\t网页连接超时时间(s),默认5s,建议不要太大')
+        print('\t-delay\t\t网页截图等待时间(s),默认1s,建议不要太大')
+        print('\t-timeout\t\t网页连接超时时间(s),默认30s,建议不要太大')
         print('\t挂代理请在cmd内执行(ip、端口自行更改)：set http_proxy=http://127.0.0.1:7890')
         sys.exit()
     import argparse
@@ -156,8 +156,8 @@ if __name__=='__main__':
     parser.add_help=True
     parser.add_argument('-f',type=str,required=True,help='需要探测的url所在的文件')
     parser.add_argument('-t',type=int,default=10,help='线程数,默认10,建议不要太大')
-    parser.add_argument('-delay',type=int,default=0.5,help='网页截图等待时间(s),默认0.5s,建议不要太大')
-    parser.add_argument('-timeout',type=int,default=5,help='网页连接超时时间(s),默认5s,建议不要太大')
+    parser.add_argument('-delay',type=int,default=1,help='网页截图等待时间(s),默认1s,建议不要太大')
+    parser.add_argument('-timeout',type=int,default=30,help='网页连接超时时间(s),默认30s,建议不要太大')
     args=parser.parse_args()
     txt_path=args.f
     process_rate=args.t
