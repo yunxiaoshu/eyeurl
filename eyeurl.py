@@ -44,12 +44,15 @@ def reqProcess(urlpaste,que,lock,m_dict,timeout,wait_time,dir_name):
         option = webdriver.ChromeOptions()
         option.add_argument('--window-size=1600,800')  # 设置option
         option.page_load_strategy = 'eager'  # 设置option
-        option.add_argument('--headless')  # 设置option
-        # option.add_argument('--disable-gpu')  # 设置option
+        option.add_argument('--headless=old')  # 设置option
+        option.add_argument('--disable-gpu')  # 设置option
+        option.add_argument('--incognito')  # 设置option
         option.add_argument('--ignore-certificate-errors')  # 设置option
         option.add_experimental_option('excludeSwitches', ['enable-logging'])  # 设置option
         path=r"chromedriver_win32\chromedriver-win32\chromedriver.exe"
         driver = webdriver.Chrome(service=Service(executable_path=path),options=option)
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => False}) "})
     while True:
         if not que.empty():
             url = que.get()
