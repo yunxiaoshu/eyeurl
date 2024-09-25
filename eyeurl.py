@@ -2,7 +2,9 @@ import sys
 from bs4 import BeautifulSoup
 from lib import urlReq
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+import lib.downloadDriver as Chrome
 from dominate.tags import *
 import dominate as dom
 import time
@@ -42,11 +44,12 @@ def reqProcess(urlpaste,que,lock,m_dict,timeout,wait_time,dir_name):
         option = webdriver.ChromeOptions()
         option.add_argument('--window-size=1600,800')  # 设置option
         option.page_load_strategy = 'eager'  # 设置option
-        option.add_argument('headless')  # 设置option
-        option.add_argument('--disable-gpu')  # 设置option
+        option.add_argument('--headless')  # 设置option
+        # option.add_argument('--disable-gpu')  # 设置option
         option.add_argument('--ignore-certificate-errors')  # 设置option
         option.add_experimental_option('excludeSwitches', ['enable-logging'])  # 设置option
-        driver = webdriver.Chrome(chrome_options=option)
+        path=r"chromedriver_win32\chromedriver-win32\chromedriver.exe"
+        driver = webdriver.Chrome(service=Service(executable_path=path),options=option)
     while True:
         if not que.empty():
             url = que.get()
@@ -152,6 +155,8 @@ if __name__=='__main__':
         print('\t挂代理请在cmd内执行(ip、端口自行更改)：set http_proxy=http://127.0.0.1:7890')
         print('\t请注意：本程序自动url去重')
         sys.exit()
+    chrome = Chrome.auto_download_chromedrive()
+    chrome.start()
     import argparse
     parser=argparse.ArgumentParser(description='eyeurl')
     parser.add_help=True

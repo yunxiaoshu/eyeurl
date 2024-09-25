@@ -40,8 +40,10 @@ python eyeurl.py -f C:\test.txt -t 20
 
 ![image-20230121162813727](https://testingcf.jsdelivr.net/gh/yunxiaoshu/images/image-20230121162813727.png)
 
-话还是之前那句，大家若是介意duck不必使用[eyeurl](https://github.com/yunxiaoshu/eyeurl)
-
-推荐大佬开发的[eyewitness](https://github.com/FortyNorthSecurity/EyeWitness/)，大家在使用过程中遇到什么问题或者有什么建议的，欢迎大家提issues
+大家在使用过程中遇到什么问题或者有什么建议的，欢迎大家提issues
 
 最后，非常感谢[eyewitness](https://github.com/FortyNorthSecurity/EyeWitness/)提供的思路，祝23年大家新年快乐~
+
+参考项目致谢：
+
+chromedriver自动更新问题解决：https://github.com/yiyuchenguang/auto_download_driver
