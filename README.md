@@ -1,49 +1,136 @@
-## eyeurl使用说明
+# EyeURL - 高性能网页批量截图工具
 
-### 程序说明
+![版本](https://img.shields.io/badge/版本-1.1.0-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.8+-green.svg)
+![Playwright](https://img.shields.io/badge/Playwright-1.42.0-orange.svg)
 
-本款工具在渗透测试乃至攻防演练中可快速打点信息收集来的网页界面，对其网页界面进行截图，整理成报告形式，方便使用者快速判断并筛选出脆弱的网站，示例图：
+EyeURL是一个基于Python和Playwright的高性能网页批量截图工具，支持多线程并发处理，能快速准确地对多个网页进行截图，并生成美观交互式的报告。
 
-![image-20230121162813727](https://testingcf.jsdelivr.net/gh/yunxiaoshu/images/image-20230121162813727.png)
+## 特色功能
 
-[eyeurl](https://github.com/yunxiaoshu/eyeurl)由作者：云小书 开发，源于日常渗透测试中，信息收集到的url过多，挨个打开查看比较繁琐，且效率极低，网上有大佬开发的[eyewitness](https://github.com/FortyNorthSecurity/EyeWitness/)，且ui布局各方面都比较完善，大家可以使用大佬开发的工具。
+- **⚡ 多线程并发**：利用多线程技术显著提高批量截图速度
+- **🖼️ 完整渲染**：采用智能加载策略确保网页内容完整呈现
+- **⏱️ 智能超时控制**：针对复杂网页的优化策略，减少超时失败
+- **🔄 自动重试机制**：自动重试失败URL，最大化成功率
+- **📊 美观报告**：生成交互式HTML报告，包含丰富数据和功能：
+  - 搜索、排序和过滤功能
+  - 分页浏览和每页显示数量调整
+  - 截图预览和缩放功能
+  - 详细的统计信息和元数据显示
+- **📈 实时进度**：控制台显示多线程处理进度和统计信息
 
-而为什么有[eyewitness](https://github.com/FortyNorthSecurity/EyeWitness/)的前提下，还自己开发一个[eyeurl](https://github.com/yunxiaoshu/eyeurl)呢？
+## 快速开始
 
-本人在使用[eyewitness](https://github.com/FortyNorthSecurity/EyeWitness/)时感觉不是很称手，大家若是介意duck不必使用[eyeurl](https://github.com/yunxiaoshu/eyeurl)
+### 安装依赖
 
-### 使用说明
+确保您已安装Python 3.8或更高版本，然后安装所需依赖：
 
-1. python环境需满足python3
-2. 需在电脑中安装谷歌浏览器
-3. 下载好后执行pip install  -r requirements
+```bash
+# 安装依赖包
+pip install -r requirements.txt
 
-上述三点准备就绪后，执行下方命令可查看说明
-
-```shell
-python eyeurl.py -h
+# 安装Playwright浏览器
+playwright install chromium
 ```
 
-![image-20230121161808270](https://testingcf.jsdelivr.net/gh/yunxiaoshu/images/image-20230121161808270.png)
+### 基本用法
 
-### 示例
+创建一个包含URL列表的文本文件（每行一个URL），然后运行：
 
+```bash
+python eyeurl.py -f url列表文件.txt
 ```
-python eyeurl.py -f C:\test.txt -t 20
+
+### 高级用法
+
+```bash
+# 使用8个线程，设置5秒等待时间，截取全页面
+python eyeurl.py -f urls.txt --threads 8 --wait 5 --full-page
+
+# 优化复杂网页的截图，增加超时和重试
+python eyeurl.py -f urls.txt --network-timeout 5 --retry 2 --timeout 60
+
+# 自定义浏览器窗口大小和User-Agent
+python eyeurl.py -f urls.txt --width 1920 --height 1080 --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X)"
 ```
 
-![image-20230121162147598](https://testingcf.jsdelivr.net/gh/yunxiaoshu/images/image-20230121162147598.png)
+## 命令行参数
 
-![image-20230121162449561](https://testingcf.jsdelivr.net/gh/yunxiaoshu/images/image-20230121162449561.png)
+| 参数 | 简写 | 描述 | 默认值 |
+|------|------|------|--------|
+| `--file` | `-f` | 包含URL列表的文本文件（必需） | - |
+| `--output` | `-o` | 报告输出目录 | report |
+| `--width` | - | 浏览器视窗宽度 | 1280 |
+| `--height` | - | 浏览器视窗高度 | 800 |
+| `--timeout` | - | 页面加载超时时间(秒) | 30 |
+| `--network-timeout` | - | 网络等待超时时间(秒) | 3 |
+| `--retry` | - | 失败时重试次数 | 1 |
+| `--threads` | - | 并行处理线程数 | 4 |
+| `--wait` | - | 页面加载后额外等待时间(秒) | 0 |
+| `--full-page` | - | 截取整个页面而非仅可见区域 | false |
+| `--user-agent` | - | 自定义User-Agent | - |
 
-若出现如下图第一个链接的标题与截图内容对应不起来，你应该清理一下你的浏览器缓存再重新运行[eyeurl](https://github.com/yunxiaoshu/eyeurl)
+## 报告功能
 
-![image-20230121162813727](https://testingcf.jsdelivr.net/gh/yunxiaoshu/images/image-20230121162813727.png)
+EyeURL生成的HTML报告具有以下功能：
 
-大家在使用过程中遇到什么问题或者有什么建议的，欢迎大家提issues
+- **搜索功能**：按URL或标题搜索
+- **排序功能**：按URL、标题、状态码或内容大小排序
+- **筛选功能**：按状态码类别或特定状态码筛选
+- **分页浏览**：支持调整每页显示数量
+- **截图预览**：点击缩略图查看大图，支持放大缩小
+- **导航功能**：支持键盘导航浏览图片
+- **统计信息**：显示总URL数、成功/失败数、总处理时间等
 
-最后，非常感谢[eyewitness](https://github.com/FortyNorthSecurity/EyeWitness/)提供的思路，祝23年大家新年快乐~
+## 处理复杂网页的优化技巧
 
-参考项目致谢：
+针对加载复杂或需要较长时间的网页（如电商网站、视频网站等），EyeURL采用了以下优化策略：
 
-chromedriver自动更新问题解决：https://github.com/yiyuchenguang/auto_download_driver
+1. **多级导航策略**：先采用快速策略，失败后自动切换到更宽松策略
+2. **智能等待机制**：针对不同加载阶段设置不同超时值
+3. **网络活动监控**：通过 `--network-timeout` 参数控制网络活动等待时间
+4. **自动重试机制**：失败时自动重试，通过 `--retry` 参数控制重试次数
+5. **截图保存优化**：即使部分加载失败，仍尽可能保存已渲染内容截图
+
+## 故障排除指南
+
+### 常见问题解决
+
+| 问题 | 解决方案 |
+|------|---------|
+| 报告显示"加载数据失败: Failed to fetch" | 已修复此问题。报告数据现在内联加载，无需外部请求 |
+| 某些网站截图为空白 | 1. 增加等待时间 `--wait 5`<br>2. 减少网络等待 `--network-timeout 1`<br>3. 增加重试 `--retry 3` |
+| 控制台输出混乱 | 已优化控制台输出，现在会自动截断长URL并使用彩色输出 |
+| 中文URL或路径报错 | 使用 `chcp 65001` 命令切换Windows终端到UTF-8编码 |
+
+### 性能优化建议
+
+- **线程数设置**：建议设置为CPU核心数的2倍 (通常4-8个)
+- **复杂网页优化**：使用 `--network-timeout 2 --retry 2 --wait 1` 组合
+- **内存使用优化**：处理大量URL时，建议限制线程数并分批处理
+- **移动设备模拟**：使用 `--width 390 --height 844 --user-agent "..."` 模拟移动端
+
+## 更新日志
+
+### v1.1.0 (2025-04-26)
+- ✅ 修复报告成功/错误数统计显示错误问题
+- ✅ 优化报告数据加载机制，解决"Failed to fetch"错误
+- ✅ 添加分页功能和每页显示数量控制
+- ✅ 改进截图预览的模态窗口体验
+- ✅ 优化控制台输出，减少冗余信息
+
+### v1.0.0 (2023新年年初)
+- 初始版本发布
+- 支持多进程批量截图
+- 生成HTML报告
+
+## 开发信息
+
+- 基于 Python 3.8+ 和 Playwright 1.42.0 开发
+- 使用 Bootstrap 5 构建响应式报告界面
+- 采用 ES6 标准编写前端JavaScript代码
+- 完全支持Windows、macOS和Linux平台
+
+## 许可证
+
+MIT License 
