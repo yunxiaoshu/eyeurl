@@ -11,6 +11,7 @@ import multiprocessing
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+import os
 
 from tqdm import tqdm
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
@@ -288,7 +289,14 @@ def capture_url(
                 screenshot_time = time.time() - screenshot_start
                 logger.info(f"{log_prefix} 截图完成，耗时: {screenshot_time:.2f}秒")
                 
+                # 记录截图文件名
                 result["screenshot"] = screenshot_path.name
+                
+                # 记录截图尺寸
+                result["meta_data"]["screenshot_size"] = os.path.getsize(screenshot_path)
+                
+                # 添加成功标记，明确表示截图成功
+                result["success"] = True
             except Exception as e:
                 # 降级为DEBUG级别，避免控制台显示错误
                 logger.debug(f"{log_prefix} 截图失败: {str(e)}")
@@ -304,12 +312,20 @@ def capture_url(
                         result["screenshot"] = screenshot_path.name
                         # 不将这视为错误，而是仅在日志中记录
                         logger.debug(f"{log_prefix} 全页面截图失败，已使用可视区域截图代替: {str(e)}")
+                        
+                        # 添加部分成功标记和警告说明
+                        result["success"] = True  # 截图最终成功了，只是不是完整页面
+                        result["warning"] = "全页面截图失败，已使用可视区域截图代替"
+                        result["meta_data"]["screenshot_type"] = "visible_only"
+                        result["meta_data"]["screenshot_size"] = os.path.getsize(screenshot_path)
                     except Exception as inner_e:
                         # 降级到DEBUG级别
                         logger.debug(f"{log_prefix} 可视区域截图也失败: {str(inner_e)}")
                         result["error"] = f"截图失败: {str(inner_e)}"
+                        result["success"] = False
                 else:
                     result["error"] = f"截图失败: {str(e)}"
+                    result["success"] = False
             
         except Exception as e:
             error_msg = str(e)

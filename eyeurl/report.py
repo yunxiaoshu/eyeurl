@@ -45,7 +45,7 @@ def generate_report(results: List[Dict[str, Any]], report_file: Path, screenshot
     start_time = time.time()
     
     logger.debug(f"开始生成HTML报告: {report_file}")
-    logger.debug(f"处理 {len(results)} 个结果项 ({sum(1 for r in results if not r.get('error'))} 成功, {sum(1 for r in results if r.get('error'))} 失败)")
+    logger.debug(f"处理 {len(results)} 个结果项 ({sum(1 for r in results if r.get('success') is True or (not r.get('error') and r.get('status_code', 0) >= 200 and r.get('status_code', 0) < 300))} 成功, {sum(1 for r in results if r.get('success') is False or (r.get('error') and r.get('success') is not True))} 失败)")
     
     report_dir = report_file.parent
     
@@ -236,8 +236,8 @@ def generate_report(results: List[Dict[str, Any]], report_file: Path, screenshot
     summary_file = report_dir / "summary.txt"
     
     # 统计成功/失败数量
-    success_count = sum(1 for r in results if not r.get("error"))
-    failed_count = sum(1 for r in results if r.get("error"))
+    success_count = sum(1 for r in results if r.get("success") is True or (not r.get("error") and r.get("status_code", 0) >= 200 and r.get("status_code", 0) < 300))
+    failed_count = sum(1 for r in results if r.get("success") is False or (r.get("error") and r.get("success") is not True))
     
     # 计算状态码分布
     status_counts = {}

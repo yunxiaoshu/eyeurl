@@ -346,8 +346,8 @@ def main():
         logger.info(f"  平均每URL处理时间: {capture_time/len(urls):.2f}秒")
         
         # 统计成功和失败数量
-        success_count = sum(1 for r in results if not r.get("error"))
-        failed_count = sum(1 for r in results if r.get("error"))
+        success_count = sum(1 for r in results if r.get("success") is True or (not r.get("error") and r.get("status_code", 0) >= 200 and r.get("status_code", 0) < 300))
+        failed_count = sum(1 for r in results if r.get("success") is False or (r.get("error") and r.get("success") is not True))
         logger.info(f"  截图结果: 成功={success_count}, 失败={failed_count}, 总计={len(results)}")
         
         # 分隔线

@@ -195,16 +195,16 @@ function updateLoadingStatus(message, status) {
 
 // 更新状态统计
 function updateStatusStats(data) {
-    // 成功URL数量（状态码2xx或success为true）
+    // 成功URL数量（优先使用success标记，若不存在则判断状态码或无error）
     const successCount = data.filter(item => 
-        (item.status_code && item.status_code >= 200 && item.status_code < 300) ||
-        (item.success === true)
+        item.success === true || 
+        ((item.status_code && item.status_code >= 200 && item.status_code < 300) && !item.error)
     ).length;
     
-    // 错误URL数量（状态码非2xx或存在error字段）
+    // 错误URL数量（优先使用success标记，若不存在则判断状态码或有error）
     const errorCount = data.filter(item => 
-        ((item.status_code && (item.status_code < 200 || item.status_code >= 300)) && item.success !== true) || 
-        item.error
+        item.success === false || 
+        (item.error && item.success !== true)
     ).length;
     
     // 更新UI
@@ -489,6 +489,7 @@ function showImageInModal(data, index) {
     
     // 设置状态信息
     let statusText = '';
+    
     if (item.status_code) {
         const statusCode = parseInt(item.status_code);
         let badgeClass = 'bg-secondary';
@@ -496,12 +497,19 @@ function showImageInModal(data, index) {
         if (statusCode >= 200 && statusCode < 300) {
             badgeClass = 'bg-success';
         } else if (statusCode >= 300 && statusCode < 400) {
+            badgeClass = 'bg-info';
+        } else if (statusCode >= 400 && statusCode < 500) {
             badgeClass = 'bg-warning text-dark';
-        } else if (statusCode >= 400) {
+        } else if (statusCode >= 500) {
             badgeClass = 'bg-danger';
         }
         
-        statusText = `<span class="badge ${badgeClass} me-2">状态码: ${item.status_code}</span>`;
+        statusText += `<span class="badge ${badgeClass} me-2">状态码: ${item.status_code}</span>`;
+    }
+    
+    // 添加警告信息（如果有）
+    if (item.warning) {
+        statusText += `<span class="badge bg-warning text-dark me-2">警告: ${item.warning}</span>`;
     }
     
     if (item.content_size) {
@@ -698,24 +706,32 @@ function displayData(data, page = 1) {
         
         // 创建状态徽章
         let statusBadge = '';
-        if (item.error) {
-            // 有错误字段，显示错误徽章
+        const statusCode = item.status_code || 0;
+        
+        if (item.success === false || (item.error && item.success !== true)) {
+            // 错误项，显示红色标记
             statusBadge = `<span class="badge bg-danger">失败</span>`;
-        } else if (item.status_code) {
-            let badgeClass = '';
-            if (item.status_code >= 200 && item.status_code < 300) {
-                badgeClass = 'bg-success';
-            } else if (item.status_code >= 300 && item.status_code < 400) {
-                badgeClass = 'bg-warning text-dark';
-            } else {
-                badgeClass = 'bg-danger';
-            }
-            statusBadge = `<span class="badge ${badgeClass}">${item.status_code}</span>`;
+        } else if (item.warning) {
+            // 带警告的成功项
+            statusBadge = `<span class="badge bg-warning text-dark" title="${item.warning}">部分成功</span>`;
+        } else if (statusCode >= 200 && statusCode < 300) {
+            // 2xx 成功状态码
+            statusBadge = `<span class="badge bg-success">${statusCode}</span>`;
+        } else if (statusCode >= 300 && statusCode < 400) {
+            // 3xx 重定向状态码
+            statusBadge = `<span class="badge bg-info">${statusCode}</span>`;
+        } else if (statusCode >= 400 && statusCode < 500) {
+            // 4xx 客户端错误
+            statusBadge = `<span class="badge bg-warning text-dark">${statusCode}</span>`;
+        } else if (statusCode >= 500) {
+            // 5xx 服务器错误
+            statusBadge = `<span class="badge bg-danger">${statusCode}</span>`;
         } else if (item.success === true) {
-            // 明确成功但无状态码
+            // 无状态码但标记为成功
             statusBadge = `<span class="badge bg-success">成功</span>`;
         } else {
-            statusBadge = '<span class="badge bg-secondary">未知</span>';
+            // 无状态码
+            statusBadge = `<span class="badge bg-secondary">未知</span>`;
         }
         
         // 填充行内容
@@ -734,7 +750,7 @@ function displayData(data, page = 1) {
             <td>${statusBadge}</td>
             <td>${formatSize(item.content_size)}</td>
             <td>
-                ${item.screenshot ? 
+                ${item.screenshot && (item.success === true || !item.error) ? 
                     `<div class="thumbnail-container">
                         <img src="screenshots/${item.screenshot}" alt="截图" class="thumbnail-img" 
                             data-url="${item.url}" data-title="${item.title || '无标题'}" 
@@ -742,6 +758,7 @@ function displayData(data, page = 1) {
                             data-size="${item.content_size || 0}"
                             data-index="${start + index}">
                         <i class="bi bi-zoom-in position-absolute" style="right: 3px; bottom: 2px; font-size: 10px; color: white; text-shadow: 0 0 2px #000;"></i>
+                        ${item.warning ? `<div class="position-absolute bottom-0 w-100 p-1 bg-warning bg-opacity-75 text-dark small"><i class="bi bi-exclamation-triangle-fill"></i> ${item.warning}</div>` : ''}
                     </div>` : 
                     `<span class="text-danger">
                         <i class="bi bi-exclamation-triangle-fill"></i> 
