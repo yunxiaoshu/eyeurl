@@ -10,7 +10,10 @@
     <style>
         body {
             background-color: #f8f9fa;
-            font-family: "Segoe UI", Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            color: #333;
         }
         
         .container {
@@ -140,9 +143,38 @@
         /* 分页控件 */
         .pagination-container {
             display: flex;
-            justify-content: space-between;
+            flex-wrap: wrap;
             align-items: center;
-            margin-top: 20px;
+        }
+        
+        /* 页码跳转控件样式 */
+        #page-input {
+            text-align: center;
+            border-radius: 4px;
+            margin-right: 5px;
+            width: 60px !important;
+            display: inline-block;
+        }
+        
+        #go-to-page {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+            border-radius: 0.2rem;
+        }
+        
+        .page-jump-container {
+            display: inline-flex;
+            align-items: center;
+        }
+        
+        /* 分页按钮样式 */
+        .pagination-button {
+            margin: 0 2px;
+        }
+        
+        /* 改进的按钮焦点样式 */
+        .btn-outline-primary:focus {
+            box-shadow: 0 0 0 0.25rem rgba(58, 85, 164, 0.25);
         }
         
         /* 按钮样式 */
@@ -430,6 +462,127 @@
         #results-table tr {
             vertical-align: middle;
         }
+        
+        .cursor-pointer {
+            cursor: pointer;
+        }
+        
+        .btn-link {
+            text-decoration: none;
+            transition: opacity 0.2s;
+        }
+        
+        .btn-link:hover {
+            opacity: 0.8;
+            text-decoration: underline;
+        }
+        
+        #status-multiselect {
+            min-height: 38px;
+        }
+        
+        .filter-item .select2-container {
+            min-width: 200px;
+        }
+        
+        /* 添加响应式布局样式 */
+        @media (max-width: 768px) {
+            .pagination-container {
+                margin-top: 10px;
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .page-jump-container {
+                margin-top: 10px;
+            }
+            
+            #pagination-info {
+                margin-top: 10px;
+                margin-bottom: 10px;
+                display: block;
+                width: 100%;
+                text-align: center;
+            }
+            
+            .filter-row {
+                flex-direction: column;
+            }
+            
+            .filter-item {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+        }
+        
+        /* 确保重置筛选按钮和分页信息在移动端显示正常 */
+        @media (max-width: 576px) {
+            .d-flex.flex-wrap.justify-content-between.align-items-center {
+                flex-direction: column;
+                align-items: flex-start !important;
+            }
+            
+            .d-flex.flex-wrap.justify-content-between.align-items-center > div {
+                margin-bottom: 10px;
+                width: 100%;
+            }
+        }
+        
+        /* 改进分页导航按钮样式 */
+        .pagination-container .btn {
+            line-height: 1.2;
+            padding: 4px 8px;
+            margin: 0 2px;
+        }
+        
+        .pagination-container .page-jump-container {
+            display: inline-flex;
+            align-items: center;
+        }
+        
+        /* 增加当前页信息样式 */
+        #page-info {
+            background-color: #f8f9fa;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            white-space: nowrap;
+        }
+        
+        #pagination-info {
+            font-size: 0.85rem;
+            padding: 4px 8px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        /* 底部分页控件样式 */
+        .bottom-pagination-container {
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+            margin-top: 15px;
+        }
+        
+        /* 优化移动设备上的底部分页控件 */
+        @media (max-width: 768px) {
+            .bottom-pagination-container {
+                margin-top: 20px;
+                padding-top: 20px;
+            }
+            
+            /* 确保在小屏幕上分页控件为整行显示 */
+            .bottom-pagination-container .d-flex.flex-wrap {
+                justify-content: center !important;
+            }
+            
+            /* 顶部和底部分页控件在小屏幕上垂直排列 */
+            .bottom-pagination-container .d-flex.flex-wrap > div {
+                margin-bottom: 10px;
+                width: 100%;
+                justify-content: center;
+                display: flex;
+            }
+        }
     </style>
 </head>
 <body>
@@ -464,13 +617,13 @@
                             <div class="col-6">
                                 <div class="stats-card success">
                                     <h5><i class="bi bi-check-circle me-1"></i>成功数</h5>
-                                    <h2 id="success-count" class="success-text">-</h2>
+                                    <h2 id="success-count" class="success-text btn-link cursor-pointer" onclick="filterByStatus('success')">-</h2>
                                 </div>
                             </div>
                             <div class="col-6">
                                 <div class="stats-card error">
-                                    <h5><i class="bi bi-exclamation-triangle me-1"></i>错误数</h5>
-                                    <h2 id="error-count" class="error-text">-</h2>
+                                    <h5><i class="bi bi-exclamation-triangle me-1"></i>失败数</h5>
+                                    <h2 id="error-count" class="error-text btn-link cursor-pointer" onclick="filterByStatus('error')">-</h2>
                                 </div>
                             </div>
                         </div>
@@ -502,28 +655,13 @@
                         
                         <!-- 过滤器和排序选项 -->
                         <div class="filter-row">
-                            <!-- 状态码过滤器 -->
-                            <div class="filter-item">
-                                <label for="status-filter">状态码:</label>
-                                <select class="form-select form-select-sm" id="status-filter">
-                                    <option value="all" selected>全部</option>
-                                    <option value="success">成功 (2xx)</option>
-                                    <option value="redirect">重定向 (3xx)</option>
-                                    <option value="client-error">客户端错误 (4xx)</option>
-                                    <option value="server-error">服务器错误 (5xx)</option>
-                                    <option value="failed">失败</option>
+                            <!-- 状态码下拉框 -->
+                            <div class="filter-item flex-grow-1">
+                                <label for="status-filter">状态码筛选:</label>
+                                <select id="status-filter" class="form-select form-select-sm">
+                                    <option value="all" selected>全部状态码</option>
+                                    <!-- 动态生成的状态码选项将在这里添加 -->
                                 </select>
-                            </div>
-                            
-                            <!-- 具体状态码筛选 -->
-                            <div class="filter-item">
-                                <label for="specific-status">具体状态码:</label>
-                                <div class="input-group input-group-sm" style="width: 150px;">
-                                    <input type="number" class="form-control" id="specific-status" placeholder="如：200, 404" min="100" max="599">
-                                    <button class="btn btn-outline-primary" type="button" id="apply-status-filter">
-                                        <i class="bi bi-filter"></i>
-                                    </button>
-                                </div>
                             </div>
                             
                             <!-- 排序字段 -->
@@ -547,68 +685,124 @@
                                 </select>
                             </div>
                         </div>
-                        
-                        <!-- 第二行过滤器 -->
-                        <div class="filter-row">
-                            <!-- 每页显示数量 -->
-                            <div class="filter-item">
-                                <label for="page-size-select">每页显示:</label>
-                                <select class="form-select form-select-sm" id="page-size-select">
-                                    <option value="10">10</option>
-                                    <option value="20" selected>20</option>
-                                    <option value="50">50</option>
-                                    <option value="100">100</option>
-                                </select>
-                            </div>
-                            
-                            <!-- 排序按钮 -->
-                            <div>
-                                <button class="btn btn-outline-primary" type="button" id="sort-button">
-                                    <i class="bi bi-sort-down"></i> 应用排序
-                                </button>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
         </div>
         
         <!-- 结果表格 -->
-        <div class="card">
-            <div class="card-header">
-                <i class="bi bi-table me-2"></i>分析结果
-            </div>
-            <div class="card-body p-3">
-                <div class="table-responsive">
-                    <table class="table table-hover table-striped" id="results-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">#</th>
-                                <th scope="col">URL</th>
-                                <th scope="col">标题</th>
-                                <th scope="col">状态码</th>
-                                <th scope="col">大小</th>
-                                <th scope="col" class="screenshot-column">截图</th>
-                            </tr>
-                        </thead>
-                        <tbody id="results-body">
-                            <!-- 这里将动态填充数据 -->
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- 分页控件 -->
-                <div class="pagination-container">
-                    <div id="pagination-info">加载中...</div>
-                    <div class="d-flex align-items-center">
-                        <div id="page-info" class="me-3">第 1 页，共 1 页</div>
-                        <div>
-                            <button id="prev-page" class="btn btn-sm btn-outline-primary me-2" disabled>
-                                <i class="bi bi-chevron-left"></i> 上一页
-                            </button>
-                            <button id="next-page" class="btn btn-sm btn-outline-primary" disabled>
-                                下一页 <i class="bi bi-chevron-right"></i>
-                            </button>
+        <div class="row">
+            <div class="col-12">
+                <div class="card mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">分析结果</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+                            <!-- 左侧：重置筛选和分页信息 -->
+                            <div class="d-flex align-items-center">
+                                <button id="reset-filters" class="btn btn-secondary btn-sm me-3">
+                                    <i class="bi bi-arrow-counterclockwise"></i> 重置筛选
+                                </button>
+                                <div id="pagination-info" class="text-muted small">
+                                    显示 0 - 0 项，共 0 项
+                                </div>
+                            </div>
+                            
+                            <!-- 右侧：每页显示和分页控件 -->
+                            <div class="d-flex align-items-center flex-wrap">
+                                <div class="me-3 d-flex align-items-center">
+                                    <label for="page-size-select" class="me-2 mb-0">每页显示:</label>
+                                    <select id="page-size-select" class="form-select form-select-sm d-inline-block w-auto">
+                                        <option value="10">10</option>
+                                        <option value="25">25</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                                <div class="pagination-container">
+                                    <button id="first-page" class="btn btn-sm btn-outline-secondary" disabled>
+                                        <i class="bi bi-chevron-double-left"></i>
+                                    </button>
+                                    <button id="prev-page" class="btn btn-sm btn-outline-secondary" disabled>
+                                        <i class="bi bi-chevron-left"></i>
+                                    </button>
+                                    <span id="page-info" class="mx-2">第 <span id="current-page">1</span> 页，共 <span id="total-pages">1</span> 页</span>
+                                    <button id="next-page" class="btn btn-sm btn-outline-secondary" disabled>
+                                        <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                    <button id="last-page" class="btn btn-sm btn-outline-secondary" disabled>
+                                        <i class="bi bi-chevron-double-right"></i>
+                                    </button>
+                                    <div class="page-jump-container ms-2">
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" class="form-control form-control-sm" id="page-input" min="1" value="1" aria-label="跳转页码" style="width: 50px">
+                                            <button class="btn btn-outline-secondary btn-sm" type="button" id="go-to-page">跳转</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover table-striped" id="results-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">#</th>
+                                        <th scope="col">URL</th>
+                                        <th scope="col">标题</th>
+                                        <th scope="col">状态码</th>
+                                        <th scope="col">大小</th>
+                                        <th scope="col" class="screenshot-column">截图</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="results-body">
+                                    <!-- 这里将动态填充数据 -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- 底部分页组件 -->
+                        <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 bottom-pagination-container">
+                            <!-- 左侧：分页信息 -->
+                            <div class="d-flex align-items-center">
+                                <div id="pagination-info-bottom" class="text-muted small">
+                                    显示 0 - 0 项，共 0 项
+                                </div>
+                            </div>
+                            
+                            <!-- 右侧：每页显示和分页控件 -->
+                            <div class="d-flex align-items-center flex-wrap">
+                                <div class="me-3 d-flex align-items-center">
+                                    <label for="page-size-select-bottom" class="me-2 mb-0">每页显示:</label>
+                                    <select id="page-size-select-bottom" class="form-select form-select-sm d-inline-block w-auto">
+                                        <option value="10">10</option>
+                                        <option value="25">25</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                                <div class="pagination-container">
+                                    <button id="first-page-bottom" class="btn btn-sm btn-outline-secondary" disabled>
+                                        <i class="bi bi-chevron-double-left"></i>
+                                    </button>
+                                    <button id="prev-page-bottom" class="btn btn-sm btn-outline-secondary" disabled>
+                                        <i class="bi bi-chevron-left"></i>
+                                    </button>
+                                    <span id="page-info-bottom" class="mx-2">第 <span id="current-page-bottom">1</span> 页，共 <span id="total-pages-bottom">1</span> 页</span>
+                                    <button id="next-page-bottom" class="btn btn-sm btn-outline-secondary" disabled>
+                                        <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                    <button id="last-page-bottom" class="btn btn-sm btn-outline-secondary" disabled>
+                                        <i class="bi bi-chevron-double-right"></i>
+                                    </button>
+                                    <div class="page-jump-container ms-2">
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" class="form-control form-control-sm" id="page-input-bottom" min="1" value="1" aria-label="跳转页码" style="width: 50px">
+                                            <button class="btn btn-outline-secondary btn-sm" type="button" id="go-to-page-bottom">跳转</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

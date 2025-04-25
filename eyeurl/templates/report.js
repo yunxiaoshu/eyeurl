@@ -208,8 +208,28 @@ function updateStatusStats(data) {
     ).length;
     
     // 更新UI
-    document.getElementById('success-count').textContent = successCount;
-    document.getElementById('error-count').textContent = errorCount;
+    const successElement = document.getElementById('success-count');
+    const errorElement = document.getElementById('error-count');
+    
+    if (successElement) {
+        successElement.textContent = successCount;
+        // 确保点击事件正常工作
+        successElement.addEventListener('click', function() {
+            filterByStatus('success');
+            // 滚动到表格
+            document.getElementById('results-table').scrollIntoView({ behavior: 'smooth' });
+        });
+    }
+    
+    if (errorElement) {
+        errorElement.textContent = errorCount;
+        // 确保点击事件正常工作
+        errorElement.addEventListener('click', function() {
+            filterByStatus('client-error');
+            // 滚动到表格
+            document.getElementById('results-table').scrollIntoView({ behavior: 'smooth' });
+        });
+    }
     
     // 获取捕获时间
     if (data.length > 0 && data[0].timestamp) {
@@ -262,34 +282,12 @@ function setupEventListeners() {
         });
     }
     
-    // 排序按钮
-    const sortButton = document.getElementById('sort-button');
-    if (sortButton) {
-        sortButton.addEventListener('click', performSort);
-    }
-    
     // 状态码过滤器
     const statusFilter = document.getElementById('status-filter');
     if (statusFilter) {
         statusFilter.addEventListener('change', function() {
             filterByStatus(this.value);
         });
-    }
-    
-    // 具体状态码筛选
-    const specificStatus = document.getElementById('specific-status');
-    const applyStatusFilter = document.getElementById('apply-status-filter');
-    
-    if (specificStatus && applyStatusFilter) {
-        // 回车键筛选
-        specificStatus.addEventListener('keyup', function(event) {
-            if (event.key === 'Enter') {
-                filterBySpecificStatus();
-            }
-        });
-        
-        // 点击按钮筛选
-        applyStatusFilter.addEventListener('click', filterBySpecificStatus);
     }
     
     // 自动应用排序
@@ -303,12 +301,38 @@ function setupEventListeners() {
     if (sortDirection) {
         sortDirection.addEventListener('change', performSort);
     }
+    
+    // 表格中的重置筛选按钮
+    const resetFiltersButton = document.getElementById('reset-filters');
+    if (resetFiltersButton) {
+        resetFiltersButton.addEventListener('click', resetAllFilters);
+    }
+    
+    // 设置每页显示数量选择器
+    setupPageSizeSelector();
+    
+    // 设置分页导航事件
+    setupPaginationEvents();
+    
+    // 设置模态框修复
+    setupModalFix();
+    
+    // 设置截图导航功能
+    setupImageNavigation();
+    
+    // 设置图片缩放功能
+    setupImageZoom();
+    
+    logger.debug("所有事件监听器设置完成");
 }
 
 // 设置页面大小选择器
 function setupPageSizeSelector() {
+    // 顶部和底部的页面大小选择器
     const pageSizeSelect = document.getElementById('page-size-select');
-    if (!pageSizeSelect) {
+    const pageSizeSelectBottom = document.getElementById('page-size-select-bottom');
+    
+    if (!pageSizeSelect || !pageSizeSelectBottom) {
         logger.warn('未找到页面大小选择器元素');
         return;
     }
@@ -319,50 +343,79 @@ function setupPageSizeSelector() {
         // 检查该值是否在选择框中存在
         const optionExists = Array.from(pageSizeSelect.options).some(option => option.value === savedPageSize);
         if (optionExists) {
+            // 同时设置顶部和底部选择器
             pageSizeSelect.value = savedPageSize;
+            pageSizeSelectBottom.value = savedPageSize;
             itemsPerPage = parseInt(savedPageSize);
         }
     }
     
-    // 添加变化事件监听器
+    // 顶部选择器变化事件
     pageSizeSelect.addEventListener('change', function() {
         const newPageSize = parseInt(this.value);
-        itemsPerPage = newPageSize;
-        
-        // 将选择保存到localStorage
-        localStorage.setItem('reportPageSize', newPageSize);
-        
-        // 重新计算总页数
-        totalPages = Math.ceil(filteredData.length / itemsPerPage);
-        
-        // 如果当前页超出新的总页数，重置为第一页
-        if (currentPage > totalPages) {
-            currentPage = 1;
-        }
-        
-        // 重新显示数据并更新分页控件
-        displayData(filteredData, currentPage);
-        updatePaginationControls();
-        updatePaginationInfo(filteredData.length);
-        
-        logger.debug(`每页显示数量已更改为: ${newPageSize}`);
+        handlePageSizeChange(newPageSize, pageSizeSelectBottom);
     });
+    
+    // 底部选择器变化事件
+    pageSizeSelectBottom.addEventListener('change', function() {
+        const newPageSize = parseInt(this.value);
+        handlePageSizeChange(newPageSize, pageSizeSelect);
+    });
+}
+
+// 处理页面大小更改
+function handlePageSizeChange(newPageSize, otherSelector) {
+    // 更新全局变量
+    itemsPerPage = newPageSize;
+    
+    // 同步另一个选择器的值
+    otherSelector.value = newPageSize;
+    
+    // 将选择保存到localStorage
+    localStorage.setItem('reportPageSize', newPageSize);
+    
+    // 重新计算总页数
+    totalPages = Math.ceil(filteredData.length / itemsPerPage);
+    
+    // 如果当前页超出新的总页数，重置为第一页
+    if (currentPage > totalPages) {
+        currentPage = 1;
+    }
+    
+    // 重新显示数据并更新分页控件
+    displayData(filteredData, currentPage);
+    updatePaginationControls();
+    updatePaginationInfo(filteredData.length);
+    
+    logger.debug(`每页显示数量已更改为: ${newPageSize}`);
 }
 
 // 更新分页信息
 function updatePaginationInfo(totalItems) {
+    // 更新顶部分页信息
     const paginationInfo = document.getElementById('pagination-info');
-    if (!paginationInfo) return;
+    // 更新底部分页信息
+    const paginationInfoBottom = document.getElementById('pagination-info-bottom');
+    
+    if (!paginationInfo || !paginationInfoBottom) {
+        logger.warn('未找到分页信息元素');
+        return;
+    }
     
     if (totalItems === 0) {
         paginationInfo.textContent = '没有匹配的结果';
+        paginationInfoBottom.textContent = '没有匹配的结果';
         return;
     }
     
     const start = (currentPage - 1) * itemsPerPage + 1;
     const end = Math.min(currentPage * itemsPerPage, totalItems);
     
-    paginationInfo.textContent = `显示 ${start} - ${end} 项，共 ${totalItems} 项`;
+    const infoText = `显示 ${start} - ${end} 项，共 ${totalItems} 项`;
+    paginationInfo.textContent = infoText;
+    paginationInfoBottom.textContent = infoText;
+    
+    logger.debug(`更新分页信息: 当前显示${start}-${end}项，共${totalItems}项`);
 }
 
 // 修复模态框问题
@@ -616,6 +669,9 @@ function processData(data) {
         // 更新URL总数统计
         document.getElementById('total-urls').textContent = data.length;
         
+        // 从数据中收集所有状态码
+        populateStatusCodesFilter(data);
+        
         // 计算成功和错误的URL数量 - 基于截图成功与否，而非状态码
         // 成功URL数量（截图成功）
         const successCount = data.filter(item => 
@@ -638,12 +694,6 @@ function processData(data) {
         // 设置页面大小选择器
         setupPageSizeSelector();
         
-        // 设置分页事件监听器（只设置一次）
-        if (!window.paginationEventsSet) {
-            setupPaginationEvents();
-            window.paginationEventsSet = true;
-        }
-        
         // 设置模态框修复
         setupModalFix();
         
@@ -654,11 +704,21 @@ function processData(data) {
         setupCodeHighlighting();
         
         // 设置事件监听器，只需要设置一次
-        setupEventListeners();
+        if (!window.eventsInitialized) {
+            setupEventListeners();
+            window.eventsInitialized = true;
+        }
         
         // 初始化分页
         currentPage = 1;
         totalPages = Math.ceil(filteredData.length / itemsPerPage);
+        
+        // 初始化页码输入框
+        const pageInput = document.getElementById('page-input');
+        if (pageInput) {
+            pageInput.value = currentPage;
+            pageInput.max = totalPages;
+        }
         
         // 显示所有数据
         displayData(filteredData, currentPage);
@@ -669,6 +729,62 @@ function processData(data) {
     } catch (error) {
         logger.error("处理数据时出错:", error);
         updateLoadingStatus("数据处理出错: " + error.message, true);
+    }
+}
+
+// 从数据中获取所有状态码，并动态生成状态码下拉框选项
+function populateStatusCodesFilter(data) {
+    // 查找下拉菜单元素
+    const statusFilter = document.getElementById('status-filter');
+    if (!statusFilter) {
+        logger.warn('未找到状态码筛选下拉框');
+        return;
+    }
+    
+    try {
+        // 清空现有选项，但保留"全部状态码"选项
+        while (statusFilter.options.length > 1) {
+            statusFilter.remove(1);
+        }
+        
+        // 收集所有不同的状态码
+        const statusCodes = new Set();
+        data.forEach(item => {
+            if (item.status_code) {
+                statusCodes.add(item.status_code);
+            }
+        });
+        
+        // 将状态码转换为数组并排序
+        const sortedStatusCodes = Array.from(statusCodes).sort((a, b) => a - b);
+        
+        // 为每个状态码添加一个选项
+        sortedStatusCodes.forEach(code => {
+            // 创建新的选项元素
+            const option = document.createElement('option');
+            option.value = `specific-${code}`;
+            
+            // 根据状态码范围设置描述
+            let description;
+            if (code >= 200 && code < 300) {
+                description = `${code} - 成功`;
+            } else if (code >= 300 && code < 400) {
+                description = `${code} - 重定向`;
+            } else if (code >= 400 && code < 500) {
+                description = `${code} - 客户端错误`;
+            } else if (code >= 500) {
+                description = `${code} - 服务器错误`;
+            } else {
+                description = `${code} - 其他`;
+            }
+            
+            option.textContent = description;
+            statusFilter.appendChild(option);
+        });
+        
+        logger.debug(`已添加 ${sortedStatusCodes.length} 个状态码选项到筛选下拉框`);
+    } catch (error) {
+        logger.error('生成状态码选项时出错:', error);
     }
 }
 
@@ -834,9 +950,9 @@ function performSearch() {
     }
     
     // 应用当前状态码过滤
-    const statusFilter = document.getElementById('status-filter').value;
-    if (statusFilter !== 'all') {
-        filterByStatus(statusFilter, false); // 传递false表示不重新计算filteredData
+    const statusFilter = document.getElementById('status-filter');
+    if (statusFilter && statusFilter.value !== 'all') {
+        filterByStatus(statusFilter.value, false); // 传递false表示不重新计算filteredData
         return; // filterByStatus函数会更新UI
     }
     
@@ -848,11 +964,43 @@ function performSearch() {
     
     // 更新显示
     displayData(filteredData, currentPage);
+    
     // 确保按顺序调用更新函数
     updatePaginationControls();
     updatePaginationInfo(filteredData.length);
     
     logger.debug(`搜索: "${searchTerm}", 找到 ${filteredData.length} 条记录`);
+}
+
+// 重置所有筛选器
+function resetAllFilters() {
+    // 重置搜索框
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) {
+        searchInput.value = '';
+    }
+    
+    // 重置状态码筛选
+    const statusFilter = document.getElementById('status-filter');
+    if (statusFilter) {
+        statusFilter.value = 'all';
+    }
+    
+    // 恢复所有数据
+    filteredData = [...allData];
+    
+    // 重置到第一页
+    currentPage = 1;
+    
+    // 重新计算总页数
+    totalPages = Math.ceil(filteredData.length / itemsPerPage);
+    
+    // 更新显示
+    displayData(filteredData, currentPage);
+    updatePaginationControls();
+    updatePaginationInfo(filteredData.length);
+    
+    logger.debug('已重置所有筛选器');
 }
 
 // 执行排序
@@ -953,31 +1101,29 @@ function formatTime(seconds) {
 
 // 根据状态码过滤数据
 function filterByStatus(statusFilter, recalculate = true) {
-    // 清空具体状态码输入框
-    const specificStatus = document.getElementById('specific-status');
-    if (specificStatus) {
-        specificStatus.value = '';
+    // 更新状态码下拉框的选中值
+    const statusFilterSelect = document.getElementById('status-filter');
+    if (statusFilterSelect && statusFilterSelect.value !== statusFilter) {
+        statusFilterSelect.value = statusFilter;
     }
     
     // 如果需要重新计算，先从所有数据开始
     let dataToFilter = recalculate ? [...allData] : filteredData;
     
-    if (statusFilter === 'all') {
+    // 检查是否是特定状态码筛选
+    if (statusFilter.startsWith('specific-')) {
+        const specificStatusCode = parseInt(statusFilter.replace('specific-', ''));
+        if (!isNaN(specificStatusCode)) {
+            filteredData = dataToFilter.filter(item => item.status_code === specificStatusCode);
+        }
+    } else if (statusFilter === 'all') {
         // 如果选择"全部"且需要重新计算，则恢复为所有数据
         if (recalculate) {
             filteredData = dataToFilter;
         }
-    } else if (statusFilter === 'failed') {
-        // 专门过滤失败的条目（带有error字段的）
-        filteredData = dataToFilter.filter(item => item.error);
     } else {
         // 根据状态码过滤
         filteredData = dataToFilter.filter(item => {
-            // 首先检查是否有错误标志，这些项应当归类为"客户端错误"
-            if (statusFilter === 'client-error' && item.error) {
-                return true;
-            }
-            
             const code = item.status_code;
             if (!code) return false;
             
@@ -1011,47 +1157,50 @@ function filterByStatus(statusFilter, recalculate = true) {
     logger.debug(`状态码过滤: ${statusFilter}, 找到 ${filteredData.length} 条记录`);
 }
 
-// 根据具体状态码筛选
-function filterBySpecificStatus() {
-    const specificStatus = document.getElementById('specific-status');
-    if (!specificStatus || !specificStatus.value) {
-        return;
-    }
-    
-    const statusValue = parseInt(specificStatus.value.trim());
-    if (isNaN(statusValue) || statusValue < 100 || statusValue > 599) {
-        alert('请输入有效的HTTP状态码 (100-599)');
-        return;
-    }
-    
-    // 重置状态码下拉选择为"全部"
-    const statusFilter = document.getElementById('status-filter');
-    if (statusFilter) {
-        statusFilter.value = 'all';
-    }
-    
-    // 筛选匹配具体状态码的项目
-    filteredData = allData.filter(item => item.status_code === statusValue);
-    
-    // 重置到第一页
-    currentPage = 1;
-    
-    // 重新计算总页数
-    totalPages = Math.ceil(filteredData.length / itemsPerPage);
-    
-    // 更新显示
-    displayData(filteredData, currentPage);
-    // 确保按顺序调用更新函数
-    updatePaginationControls();
-    updatePaginationInfo(filteredData.length);
-    
-    logger.debug(`具体状态码过滤: ${statusValue}, 找到 ${filteredData.length} 条记录`);
-}
-
 // 设置分页事件
 function setupPaginationEvents() {
+    // 顶部分页控件
+    setupPaginationEventHandlers(
+        'first-page', 
+        'prev-page', 
+        'next-page', 
+        'last-page', 
+        'page-input', 
+        'go-to-page'
+    );
+    
+    // 底部分页控件
+    setupPaginationEventHandlers(
+        'first-page-bottom', 
+        'prev-page-bottom', 
+        'next-page-bottom', 
+        'last-page-bottom', 
+        'page-input-bottom', 
+        'go-to-page-bottom'
+    );
+    
+    logger.debug('分页事件设置完成 - 顶部和底部');
+}
+
+// 设置分页事件处理程序
+function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInputId, goToPageId) {
+    // 首页按钮
+    const firstButton = document.getElementById(firstId);
+    if (firstButton) {
+        firstButton.addEventListener('click', function() {
+            if (currentPage > 1) {
+                currentPage = 1;
+                displayData(filteredData, currentPage);
+                updatePaginationControls();
+                updatePaginationInfo(filteredData.length);
+                // 滚动到表格顶部
+                document.getElementById('results-table').scrollIntoView({ behavior: 'smooth' });
+            }
+        });
+    }
+    
     // 前一页按钮
-    const prevButton = document.getElementById('prev-page');
+    const prevButton = document.getElementById(prevId);
     if (prevButton) {
         prevButton.addEventListener('click', function() {
             if (currentPage > 1) {
@@ -1066,7 +1215,7 @@ function setupPaginationEvents() {
     }
     
     // 下一页按钮
-    const nextButton = document.getElementById('next-page');
+    const nextButton = document.getElementById(nextId);
     if (nextButton) {
         nextButton.addEventListener('click', function() {
             if (currentPage < totalPages) {
@@ -1079,30 +1228,121 @@ function setupPaginationEvents() {
             }
         });
     }
+    
+    // 末页按钮
+    const lastButton = document.getElementById(lastId);
+    if (lastButton) {
+        lastButton.addEventListener('click', function() {
+            if (currentPage < totalPages) {
+                currentPage = totalPages;
+                displayData(filteredData, currentPage);
+                updatePaginationControls();
+                updatePaginationInfo(filteredData.length);
+                // 滚动到表格顶部
+                document.getElementById('results-table').scrollIntoView({ behavior: 'smooth' });
+            }
+        });
+    }
+    
+    // 跳转到指定页
+    const goToPageButton = document.getElementById(goToPageId);
+    const pageInput = document.getElementById(pageInputId);
+    
+    if (goToPageButton && pageInput) {
+        goToPageButton.addEventListener('click', function() {
+            goToSpecificPage(pageInput);
+        });
+        
+        // 在输入框按下回车键也可跳转
+        pageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                goToSpecificPage(pageInput);
+            }
+        });
+    }
+}
+
+// 跳转到指定页
+function goToSpecificPage(pageInput) {
+    const pageNumber = parseInt(pageInput.value);
+    if (!isNaN(pageNumber) && pageNumber >= 1 && pageNumber <= totalPages && pageNumber !== currentPage) {
+        currentPage = pageNumber;
+        displayData(filteredData, currentPage);
+        updatePaginationControls();
+        updatePaginationInfo(filteredData.length);
+        // 滚动到表格顶部
+        document.getElementById('results-table').scrollIntoView({ behavior: 'smooth' });
+    } else if (pageNumber < 1 || pageNumber > totalPages) {
+        // 提供视觉反馈
+        pageInput.classList.add('is-invalid');
+        setTimeout(() => {
+            pageInput.classList.remove('is-invalid');
+        }, 1000);
+    }
 }
 
 // 更新分页控件
 function updatePaginationControls() {
+    // 顶部分页控件元素
+    const firstButton = document.getElementById('first-page');
     const prevButton = document.getElementById('prev-page');
     const nextButton = document.getElementById('next-page');
+    const lastButton = document.getElementById('last-page');
     const pageInfo = document.getElementById('page-info');
+    const pageInput = document.getElementById('page-input');
+    const goToPageButton = document.getElementById('go-to-page');
     
-    if (!pageInfo || !prevButton || !nextButton) {
+    // 底部分页控件元素
+    const firstButtonBottom = document.getElementById('first-page-bottom');
+    const prevButtonBottom = document.getElementById('prev-page-bottom');
+    const nextButtonBottom = document.getElementById('next-page-bottom');
+    const lastButtonBottom = document.getElementById('last-page-bottom');
+    const pageInfoBottom = document.getElementById('page-info-bottom');
+    const pageInputBottom = document.getElementById('page-input-bottom');
+    const goToPageButtonBottom = document.getElementById('go-to-page-bottom');
+    
+    // 验证所有元素都存在
+    if (!pageInfo || !prevButton || !nextButton || !firstButton || !lastButton || !pageInput || !goToPageButton ||
+        !pageInfoBottom || !prevButtonBottom || !nextButtonBottom || !firstButtonBottom || !lastButtonBottom || 
+        !pageInputBottom || !goToPageButtonBottom) {
         logger.warn('未找到分页控件元素');
         return;
     }
     
     // 如果没有数据或者只有一页，隐藏分页控件
     const paginationContainer = document.querySelector('.pagination-container');
+    const paginationContainerBottom = document.querySelectorAll('.pagination-container')[1];
+    
     if (totalPages <= 1) {
         if (paginationContainer) {
             paginationContainer.style.display = filteredData.length > 0 ? 'flex' : 'none';
         }
-        pageInfo.textContent = filteredData.length > 0 ? 
-            `第 1 页，共 1 页` : 
-            `没有数据`;
+        if (paginationContainerBottom) {
+            paginationContainerBottom.style.display = filteredData.length > 0 ? 'flex' : 'none';
+        }
+        
+        const noDataText = filteredData.length > 0 ? `第 1 页，共 1 页` : `没有数据`;
+        
+        // 更新顶部分页控件
+        pageInfo.textContent = noDataText;
+        firstButton.disabled = true;
         prevButton.disabled = true;
         nextButton.disabled = true;
+        lastButton.disabled = true;
+        goToPageButton.disabled = true;
+        pageInput.disabled = true;
+        pageInput.value = 1;
+        
+        // 更新底部分页控件
+        pageInfoBottom.textContent = noDataText;
+        firstButtonBottom.disabled = true;
+        prevButtonBottom.disabled = true;
+        nextButtonBottom.disabled = true;
+        lastButtonBottom.disabled = true;
+        goToPageButtonBottom.disabled = true;
+        pageInputBottom.disabled = true;
+        pageInputBottom.value = 1;
+        
         return;
     }
     
@@ -1110,17 +1350,50 @@ function updatePaginationControls() {
     if (paginationContainer) {
         paginationContainer.style.display = 'flex';
     }
+    if (paginationContainerBottom) {
+        paginationContainerBottom.style.display = 'flex';
+    }
     
-    // 更新页数信息
-    pageInfo.textContent = `第 ${currentPage} 页，共 ${totalPages} 页`;
+    // 更新页数信息文本
+    const pageInfoText = `第 ${currentPage} 页，共 ${totalPages} 页`;
+    pageInfo.textContent = pageInfoText;
+    pageInfoBottom.textContent = pageInfoText;
     
-    // 更新按钮状态
+    // 更新顶部页码输入框
+    pageInput.value = currentPage;
+    pageInput.max = totalPages;
+    pageInput.disabled = false;
+    goToPageButton.disabled = false;
+    
+    // 更新底部页码输入框
+    pageInputBottom.value = currentPage;
+    pageInputBottom.max = totalPages;
+    pageInputBottom.disabled = false;
+    goToPageButtonBottom.disabled = false;
+    
+    // 更新按钮状态 - 顶部
+    firstButton.disabled = currentPage <= 1;
     prevButton.disabled = currentPage <= 1;
     nextButton.disabled = currentPage >= totalPages;
+    lastButton.disabled = currentPage >= totalPages;
     
-    // 添加适当的标签以提高可访问性
+    // 更新按钮状态 - 底部
+    firstButtonBottom.disabled = currentPage <= 1;
+    prevButtonBottom.disabled = currentPage <= 1;
+    nextButtonBottom.disabled = currentPage >= totalPages;
+    lastButtonBottom.disabled = currentPage >= totalPages;
+    
+    // 添加适当的标签以提高可访问性 - 顶部
+    firstButton.setAttribute('aria-label', '转到第一页');
     prevButton.setAttribute('aria-label', `转到第 ${currentPage - 1} 页`);
     nextButton.setAttribute('aria-label', `转到第 ${currentPage + 1} 页`);
+    lastButton.setAttribute('aria-label', '转到最后一页');
+    
+    // 添加适当的标签以提高可访问性 - 底部
+    firstButtonBottom.setAttribute('aria-label', '转到第一页');
+    prevButtonBottom.setAttribute('aria-label', `转到第 ${currentPage - 1} 页`);
+    nextButtonBottom.setAttribute('aria-label', `转到第 ${currentPage + 1} 页`);
+    lastButtonBottom.setAttribute('aria-label', '转到最后一页');
     
     logger.debug(`更新分页控件: 当前页=${currentPage}, 总页数=${totalPages}`);
 } 
