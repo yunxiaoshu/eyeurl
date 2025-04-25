@@ -439,6 +439,24 @@ async def capture_url(
         status = response.status
         metadata["status_code"] = status
         
+        # 获取响应内容大小
+        try:
+            # 尝试从响应头中获取内容大小
+            content_length = response.headers.get("content-length")
+            if content_length and content_length.isdigit():
+                content_size = int(content_length)
+            else:
+                # 如果响应头中没有content-length，则获取页面HTML大小
+                content_size = len(await page.content())
+            
+            metadata["content_size"] = content_size
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"页面内容大小: {format_bytes(content_size)}")
+        except Exception as e:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"获取内容大小失败: {str(e)}")
+            metadata["content_size"] = 0
+        
         if status >= 400:
             logger.warning(f"页面返回错误状态码: {status}")
         
@@ -528,6 +546,14 @@ async def capture_url(
             try:
                 title = await page.title()
                 metadata["title"] = title
+                
+                # 确保content_size存在
+                if "content_size" not in metadata or metadata["content_size"] == 0:
+                    try:
+                        content_size = len(await page.content())
+                        metadata["content_size"] = content_size
+                    except Exception:
+                        pass
                 
                 # 获取页面描述
                 description = await page.evaluate("""() => {
@@ -894,6 +920,24 @@ def capture_url_sync(
                 status_code = response.status
                 metadata["status_code"] = status_code
                 
+                # 获取响应内容大小
+                try:
+                    # 尝试从响应头中获取内容大小
+                    content_length = response.headers.get("content-length")
+                    if content_length and content_length.isdigit():
+                        content_size = int(content_length)
+                    else:
+                        # 如果响应头中没有content-length，则获取页面HTML大小
+                        content_size = len(page.content())
+                    
+                    metadata["content_size"] = content_size
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"页面内容大小: {format_bytes(content_size)}")
+                except Exception as e:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"获取内容大小失败: {str(e)}")
+                    metadata["content_size"] = 0
+                
                 # 添加状态码信息，但不设置error字段和success字段
                 # 仅记录状态码供参考，不影响截图成功与否的判断
                 if status_code >= 400:
@@ -1015,6 +1059,14 @@ def capture_url_sync(
                 try:
                     title = page.title()
                     metadata["title"] = title
+                    
+                    # 确保content_size存在
+                    if "content_size" not in metadata or metadata["content_size"] == 0:
+                        try:
+                            content_size = len(page.content())
+                            metadata["content_size"] = content_size
+                        except Exception:
+                            pass
                     
                     # 获取页面描述
                     description = page.evaluate("""() => {
@@ -1165,14 +1217,21 @@ def format_status_code(status_code):
 
 def format_bytes(size_bytes):
     """格式化字节大小为可读格式"""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
-        return f"{size_bytes/1024:.2f} KB"
-    elif size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes/(1024*1024):.2f} MB"
-    else:
-        return f"{size_bytes/(1024*1024*1024):.2f} GB"
+    try:
+        size_bytes = int(size_bytes)
+        if size_bytes < 0:
+            return "0 B"
+        
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes/1024:.2f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes/(1024*1024):.2f} MB"
+        else:
+            return f"{size_bytes/(1024*1024*1024):.2f} GB"
+    except (TypeError, ValueError):
+        return "0 B"  # 处理None或无效的值
 
 
 def capture_urls_parallel(
@@ -1188,25 +1247,72 @@ def capture_urls_parallel(
     logger: logging.Logger,
     retry_count: int = 1,
     network_timeout: int = 3,
-    verbose: bool = False
+    verbose: bool = False,
+    start_page: int = 1,
+    end_page: int = None,
+    page_size: int = None
 ) -> List[Dict[str, Any]]:
-    """并行批量捕获URL的信息和截图"""
+    """并行批量捕获URL的信息和截图
+    
+    Args:
+        urls: URL列表
+        screenshots_dir: 截图保存目录
+        timeout: 页面加载超时时间(秒)
+        width: 视窗宽度
+        height: 视窗高度
+        wait_time: 额外等待时间(秒)
+        full_page: 是否截取整个页面
+        threads: 并行线程数
+        user_agent: 自定义User-Agent
+        logger: 日志记录器
+        retry_count: 重试次数
+        network_timeout: 网络空闲超时时间(秒)
+        verbose: 是否详细输出
+        start_page: 从第几页开始处理，从1开始计数
+        end_page: 处理到第几页结束，如果为None则处理到最后
+        page_size: 每页大小，如果为None则所有URL视为一页
+    """
     # 初始化结果列表
     all_results = []
     
-    logger.info(f"开始并行处理 {len(urls)} 个URL，使用 {threads} 个线程")
+    # 处理分页参数
+    if page_size is not None and page_size > 0:
+        # 计算总页数
+        total_pages = (len(urls) + page_size - 1) // page_size
+        
+        # 规范化起始页和结束页
+        start_page = max(1, min(start_page, total_pages))
+        if end_page is None:
+            end_page = total_pages
+        else:
+            end_page = max(start_page, min(end_page, total_pages))
+        
+        # 计算实际要处理的URL范围
+        start_idx = (start_page - 1) * page_size
+        end_idx = min(end_page * page_size, len(urls))
+        
+        # 获取当前页范围的URL
+        current_urls = urls[start_idx:end_idx]
+        
+        logger.info(f"分页处理: 总共{len(urls)}个URL, {total_pages}页, 当前处理第{start_page}页到第{end_page}页, 共{len(current_urls)}个URL")
+    else:
+        # 不分页，处理所有URL
+        current_urls = urls
+        logger.info(f"开始处理所有{len(urls)}个URL")
+    
+    logger.info(f"开始并行处理 {len(current_urls)} 个URL，使用 {threads} 个线程")
     
     # 记录总处理开始时间
     total_start_time = time.time()
     
     # 创建进程池
-    pool_size = min(threads, len(urls))
+    pool_size = min(threads, len(current_urls))
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"创建进程池，大小: {pool_size}")
     
     # 准备参数列表
     args_list = []
-    for i, url in enumerate(urls):
+    for i, url in enumerate(current_urls):
         args = {
             "url": url,
             "screenshot_dir": screenshots_dir,
@@ -1229,14 +1335,14 @@ def capture_urls_parallel(
         logger.debug("初始化多进程共享管理器")
     progress_dict = multiprocessing.Manager().dict()
     progress_dict["completed"] = 0
-    progress_dict["total"] = len(urls)
+    progress_dict["total"] = len(current_urls)
     progress_dict["success"] = 0
     progress_dict["failed"] = 0
     progress_dict["batch_start_time"] = time.time()  # 记录批处理开始时间
     
     # 创建进程池
     if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"启动进程池，开始处理 {len(urls)} 个URL")
+        logger.debug(f"启动进程池，开始处理 {len(current_urls)} 个URL")
     with multiprocessing.Pool(processes=pool_size) as pool:
         # 创建回调函数来更新计数
         def update_result_callback(result):
@@ -1256,10 +1362,10 @@ def capture_urls_parallel(
         result_objects = [pool.apply_async(worker_process, (args,), callback=update_result_callback) 
                          for args in args_list]
         
-        logger.info(f"已分配 {len(urls)} 个任务到进程池")
+        logger.info(f"已分配 {len(current_urls)} 个任务到进程池")
         
         # 显示进度条
-        with tqdm(total=len(urls), desc="正在截图", unit="URL", 
+        with tqdm(total=len(current_urls), desc="正在截图", unit="URL", 
                  bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]") as pbar:
             
             last_completed = 0
@@ -1268,7 +1374,7 @@ def capture_urls_parallel(
             start_wait_time = time.time()
             
             # 循环等待任务完成，但设置最大等待时间
-            while progress_dict["completed"] < len(urls):
+            while progress_dict["completed"] < len(current_urls):
                 # 检查是否已等待太久
                 if time.time() - start_wait_time > max_wait_time:
                     logger.warning(f"等待任务完成超过{max_wait_time}秒，提前退出等待")
@@ -1304,7 +1410,7 @@ def capture_urls_parallel(
                 # 计算估计剩余时间
                 if avg_times:
                     avg_time = sum(avg_times) / len(avg_times)
-                    remaining_urls = len(urls) - completed
+                    remaining_urls = len(current_urls) - completed
                     estimated_time = remaining_urls * avg_time
                     time_str = format_time(estimated_time)
                     total_time_str = format_time(current_total_time)
@@ -1318,7 +1424,7 @@ def capture_urls_parallel(
                 time.sleep(0.1)
             
             # 确保进度条显示100%
-            pbar.n = len(urls)
+            pbar.n = len(current_urls)
             
             # 更新最终的成功/失败计数
             success = progress_dict.get("success", 0)
@@ -1349,7 +1455,7 @@ def capture_urls_parallel(
                 total_processing_time += result.get("processing_time", 0)
                 
                 # 只记录日志，不再更新计数（计数已经在回调函数中更新）
-                url = urls[i]
+                url = current_urls[i]
                 truncated_url = truncate_url(url)
                 
                 # 只有当结果包含error字段且success不为True时才视为截图失败
@@ -1361,10 +1467,10 @@ def capture_urls_parallel(
                         logger.debug(f"截图成功: {truncated_url} - 状态码: {status_code} - 耗时: {result.get('processing_time', 0):.2f}秒")
                 
             except multiprocessing.TimeoutError:
-                logger.error(f"获取任务结果超时: {truncate_url(urls[i])}")
+                logger.error(f"获取任务结果超时: {truncate_url(current_urls[i])}")
                 # 创建超时错误结果
                 error_result = {
-                    "url": urls[i],
+                    "url": current_urls[i],
                     "title": "",
                     "status_code": 0,
                     "content_size": 0,
@@ -1378,10 +1484,10 @@ def capture_urls_parallel(
                 results.append(error_result)
                 
             except Exception as e:
-                logger.error(f"处理URL时出错: {truncate_url(urls[i])} - {str(e)}")
+                logger.error(f"处理URL时出错: {truncate_url(current_urls[i])} - {str(e)}")
                 # 创建错误结果
                 error_result = {
-                    "url": urls[i],
+                    "url": current_urls[i],
                     "title": "",
                     "status_code": 0,
                     "content_size": 0,
@@ -1397,11 +1503,11 @@ def capture_urls_parallel(
                 progress_dict["failed"] = progress_dict.get("failed", 0) + 1
         
         # 如果结果数量少于URL数量，补充缺失的结果
-        if len(results) < len(urls):
-            logger.warning(f"结果数量({len(results)})少于预期({len(urls)})，补充缺失的结果")
+        if len(results) < len(current_urls):
+            logger.warning(f"结果数量({len(results)})少于预期({len(current_urls)})，补充缺失的结果")
             # 创建URL集合，找出缺失的URL
             processed_urls = {r["url"] for r in results}
-            for url in urls:
+            for url in current_urls:
                 if url not in processed_urls:
                     error_result = {
                         "url": url,
@@ -1435,10 +1541,16 @@ def capture_urls_parallel(
     
         # 创建批处理结果信息字典 - 将直接添加到结果中
         batch_info = {
-            "total_urls": len(urls),
+            "total_urls": len(current_urls),
             "total_success": progress_dict.get("success", 0),
             "total_failed": progress_dict.get("failed", 0),
-            "batch_time": batch_time_info  # 使用一致的时间信息
+            "batch_time": batch_time_info,  # 使用一致的时间信息
+            "page_info": {
+                "start_page": start_page,
+                "end_page": end_page,
+                "page_size": page_size,
+                "total_pages": total_pages if page_size else 1
+            }
         }
         
         # 将批处理信息添加到结果中，便于报告生成
