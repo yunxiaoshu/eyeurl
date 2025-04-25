@@ -231,10 +231,6 @@ def generate_report(results: List[Dict[str, Any]], report_file: Path, screenshot
         logger.warning(f"设置文件权限时出错: {e}")
         print(f"警告: 设置文件权限时出错: {e}")
     
-    # 创建报告摘要文件，便于快速查看结果
-    logger.debug(f"创建报告摘要文件")
-    summary_file = report_dir / "summary.txt"
-    
     # 统计成功/失败数量
     success_count = sum(1 for r in results if r.get("success") is True or (not r.get("error") and r.get("status_code", 0) >= 200 and r.get("status_code", 0) < 300))
     failed_count = sum(1 for r in results if r.get("success") is False or (r.get("error") and r.get("success") is not True))
@@ -249,26 +245,6 @@ def generate_report(results: List[Dict[str, Any]], report_file: Path, screenshot
     # 计算平均处理时间
     total_time = sum(r.get("processing_time", 0) for r in results)
     avg_time = total_time / len(results) if results else 0
-    
-    # 写入摘要信息
-    try:
-        with open(summary_file, 'w', encoding='utf-8') as f:
-            f.write(f"EyeURL 截图报告摘要\n")
-            f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"总URL数: {len(results)}\n")
-            f.write(f"成功: {success_count}\n")
-            f.write(f"失败: {failed_count}\n")
-            f.write(f"成功率: {success_count/len(results)*100:.1f}%\n")
-            f.write(f"平均处理时间: {avg_time:.2f}秒\n\n")
-            
-            if status_counts:
-                f.write("状态码分布:\n")
-                for status, count in sorted(status_counts.items()):
-                    f.write(f"  {status}: {count}个 ({count/len(results)*100:.1f}%)\n")
-        
-        logger.debug(f"摘要文件创建成功: {summary_file} (大小: {format_file_size(os.path.getsize(summary_file))})")
-    except Exception as e:
-        logger.warning(f"创建摘要文件失败: {str(e)}")
     
     # 计算报告生成耗时
     elapsed_time = time.time() - start_time
@@ -291,7 +267,6 @@ def generate_report(results: List[Dict[str, Any]], report_file: Path, screenshot
         
         logger.debug(f"  - 报告文件: {report_file}")
         logger.debug(f"  - JSON数据: {data_file}")
-        logger.debug(f"  - 摘要文件: {summary_file}")
 
 
 def format_file_size(size_bytes: int) -> str:

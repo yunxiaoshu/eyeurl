@@ -217,8 +217,30 @@ function updateStatusStats(data) {
         document.getElementById('capture-time').textContent = captureDate.toLocaleString();
     }
     
-    // 计算总处理时间
-    const totalTime = data.reduce((sum, item) => sum + (item.processing_time || 0), 0);
+    // 获取批处理总耗时
+    let totalTime = 0;
+    
+    // 优先使用batch_info中的总耗时（从控制台获取的完整任务耗时）
+    if (data.length > 0 && data[0].meta_data && data[0].meta_data.batch_info && 
+        data[0].meta_data.batch_info.batch_time && 
+        data[0].meta_data.batch_info.batch_time.total_time_seconds) {
+        // 使用控制台中的总耗时
+        totalTime = data[0].meta_data.batch_info.batch_time.total_time_seconds;
+        logger.debug(`使用控制台总耗时: ${totalTime}秒`);
+        
+        if (data[0].meta_data.batch_info.batch_time.total_time_formatted) {
+            // 如果有格式化的时间，直接使用
+            document.getElementById('total-time').textContent = 
+                data[0].meta_data.batch_info.batch_time.total_time_formatted;
+            return;
+        }
+    } else {
+        // 后备：累加所有URL的处理时间
+        totalTime = data.reduce((sum, item) => sum + (item.processing_time || 0), 0);
+        logger.debug(`使用累加URL处理时间: ${totalTime}秒`);
+    }
+    
+    // 显示总耗时
     document.getElementById('total-time').textContent = formatTime(totalTime);
 }
 
@@ -474,7 +496,7 @@ function showImageInModal(data, index) {
         modalImage.style.opacity = '1';
         document.getElementById('modalLoading').style.display = 'none';
     };
-    newImage.src = `screenshots/${item.screenshot}`;
+    newImage.src = `screenshots/${item.screenshot}`; // 直接使用文件名，现在在capture.py中已经只存储文件名
     
     // 设置打开URL按钮
     const openUrlBtn = document.getElementById('openUrlBtn');
