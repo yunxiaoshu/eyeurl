@@ -62,12 +62,21 @@ async def wait_for_render_complete(page, logger: logging.Logger, max_wait_time: 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"初始DOM大小: {last_dom_size}")
         
+        # 检查页面是否仍在加载资源
+        requests_in_flight = await check_network_activity(page)
+        if requests_in_flight > 0:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"页面仍有 {requests_in_flight} 个网络请求正在进行")
+        
         while time.time() - start_time < max_wait_time:
             # 等待一小段时间
             await page.wait_for_timeout(check_interval * 1000)
             
             # 检查当前DOM大小
             current_dom_size = await get_dom_size(page)
+            
+            # 检查当前网络活动
+            current_requests = await check_network_activity(page)
             
             # 计算变化百分比
             if last_dom_size > 0:
@@ -76,10 +85,13 @@ async def wait_for_render_complete(page, logger: logging.Logger, max_wait_time: 
                 change_percent = 100 if current_dom_size > 0 else 0
             
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"当前DOM大小: {current_dom_size}, 变化: {change_percent:.2f}%")
+                log_message = f"当前DOM大小: {current_dom_size}, 变化: {change_percent:.2f}%"
+                if current_requests > 0:
+                    log_message += f", 网络请求: {current_requests}个"
+                logger.debug(log_message)
             
-            # 如果DOM大小变化很小，增加稳定计数
-            if change_percent < 1.0:  # 变化小于1%
+            # 如果DOM大小变化很小且网络活动较少，增加稳定计数
+            if change_percent < 1.0 and current_requests <= 1:  # 变化小于1%且最多1个网络请求
                 stable_count += 1
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"DOM结构稳定中 ({stable_count}/3)")
@@ -105,6 +117,26 @@ async def wait_for_render_complete(page, logger: logging.Logger, max_wait_time: 
         return False
 
 
+async def check_network_activity(page):
+    """检查页面当前网络活动"""
+    try:
+        return await page.evaluate("""() => {
+            // 如果performance timing API可用
+            if (window.performance && window.performance.getEntriesByType) {
+                const resources = window.performance.getEntriesByType('resource');
+                // 检查最近5秒内开始的资源请求
+                const recentResources = resources.filter(r => 
+                    (Date.now() - r.startTime) < 5000 && 
+                    (!r.responseEnd || r.responseEnd === 0)
+                );
+                return recentResources.length;
+            }
+            return 0;  // API不可用时默认返回0
+        }""")
+    except Exception:
+        return 0  # 出错时默认返回0
+
+
 async def take_screenshot(page, path, width, height, quality=80):
     """
     截取页面截图
@@ -127,14 +159,68 @@ async def take_screenshot(page, path, width, height, quality=80):
             logger.debug(f"设置视窗大小: {width}x{height}")
         await page.set_viewport_size({"width": width, "height": height})
         
+        # 确保页面已稳定
+        await ensure_screenshot_ready(page, logger)
+        
         # 截取屏幕
         await page.screenshot(path=path, full_page=True, quality=quality)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"截图成功: {path}")
-        return True
+        
+        # 验证截图是否成功
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            return True
+        else:
+            logger.error(f"截图文件为空或不存在: {path}")
+            return False
     except Exception as e:
         logger.error(f"截图失败: {str(e)}")
         return False
+
+
+async def ensure_screenshot_ready(page, logger):
+    """确保页面已准备好进行截图"""
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("确保页面已准备好截图...")
+    
+    try:
+        # 检查页面可见性
+        visible = await page.evaluate("""() => {
+            return document.visibilityState === 'visible';
+        }""")
+        
+        if not visible:
+            logger.warning("页面不可见，可能影响截图质量")
+        
+        # 确保滚动回到顶部
+        await page.evaluate("""() => { window.scrollTo(0, 0); }""")
+        
+        # 强制触发一次重绘
+        await page.evaluate("""() => {
+            return new Promise((resolve) => {
+                requestAnimationFrame(() => {
+                    setTimeout(resolve, 100);  // 等待100ms确保重绘完成
+                });
+            });
+        }""")
+        
+        # 检查是否有固定位置的元素可能会导致重叠问题
+        fixed_elements = await page.evaluate("""() => {
+            const elements = Array.from(document.querySelectorAll('*'));
+            return elements.filter(el => {
+                const style = window.getComputedStyle(el);
+                return style.position === 'fixed' && 
+                       style.display !== 'none' && 
+                       el.offsetWidth > 0 && 
+                       el.offsetHeight > 0;
+            }).length;
+        }""")
+        
+        if fixed_elements > 0 and logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"页面包含 {fixed_elements} 个固定定位元素，可能影响全页面截图")
+        
+    except Exception as e:
+        logger.warning(f"截图准备过程中出错: {str(e)}")
 
 
 async def check_images_loaded(page, logger, timeout=5):
@@ -360,67 +446,80 @@ async def capture_url(
         # 1. 首先等待DOM内容加载
         if not await wait_for_page_load(page, timeout=30, wait_time=1.0, network_timeout=30):
             logger.warning("DOM内容加载超时，尝试备选加载策略")
-        
-        # 2. 然后等待网络活动停止
-        if not await wait_for_page_load(page, timeout=30, wait_time=1.0, network_timeout=30):
-            logger.warning("等待网络活动停止超时，尝试备选加载策略")
-        
-        # 3. 最后等待load事件
-        if not await wait_for_page_load(page, timeout=30, wait_time=1.0, network_timeout=30):
-            logger.warning("等待load事件超时")
             
-        # 等待body元素可见
-        try:
-            await page.wait_for_selector("body", state="visible", timeout=10000)
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("等待body元素完成")
-        except Exception as e:
-            logger.warning(f"等待body元素超时: {str(e)}")
+            # 尝试重新加载页面
+            try:
+                logger.info("尝试重新加载页面...")
+                response = await page.reload(timeout=timeout, wait_until="domcontentloaded")
+                if response:
+                    logger.info(f"页面重新加载成功，状态码: {response.status}")
+                    metadata["status_code"] = response.status
+            except Exception as e:
+                logger.warning(f"重新加载页面失败: {str(e)}")
         
-        # 检查页面可见性
-        try:
-            visible = await page.evaluate("""() => {
-                return document.visibilityState === 'visible';
-            }""")
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"页面可见性状态: {'可见' if visible else '不可见'}")
-        except Exception as e:
-            logger.warning(f"检查页面可见性失败: {str(e)}")
+        # 2. 检查图片是否加载完成
+        images_loaded = await check_images_loaded(page, logger, timeout=10)  # 增加图片等待时间
+        if not images_loaded:
+            logger.warning("页面图片未完全加载，可能影响截图质量")
+        
+        # 3. 等待页面渲染稳定
+        stable = await wait_for_render_complete(page, logger, max_wait_time=20)  # 增加渲染稳定等待时间
+        if not stable:
+            logger.warning("页面渲染未稳定，可能影响截图质量")
         
         # 处理懒加载内容 - 滚动页面以触发懒加载
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("处理懒加载内容 - 滚动页面")
-            await page.evaluate("""() => {
-                return new Promise((resolve) => {
-                    let totalHeight = 0;
-                    const distance = 300;
-                    const scrollDown = () => {
-                        window.scrollBy(0, distance);
-                        totalHeight += distance;
-                        
-                        if (totalHeight >= document.body.scrollHeight) {
-                            window.scrollTo(0, 0);  // 滚回顶部
-                            resolve();
-                        } else {
-                            setTimeout(scrollDown, 100);
-                        }
-                    };
-                    scrollDown();
-                });
-            }""")
+        await page.evaluate("""() => {
+            return new Promise((resolve) => {
+                let totalHeight = 0;
+                const distance = 300;
+                const scrollInterval = setInterval(() => {
+                    window.scrollBy(0, distance);
+                    totalHeight += distance;
+                    
+                    if (totalHeight >= document.body.scrollHeight) {
+                        clearInterval(scrollInterval);
+                        window.scrollTo(0, 0);  // 滚回顶部
+                        resolve();
+                    }
+                }, 100);
+            });
+        }""")
         
-        # 检查图片是否加载完成
-        await check_images_loaded(page, logger)
-        
-        # 等待页面渲染稳定
-        stable = await wait_for_render_complete(page, logger)
-        if not stable:
-            logger.warning("页面渲染未稳定，可能影响截图质量")
-        
-        # 额外等待一定时间，确保动画和其他视觉元素完成
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"额外等待 {wait_time}ms")
+        # 添加额外的等待时间，让图片和其他资源完成加载
+        if wait_time > 0:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"额外等待 {wait_time}ms")
             await page.wait_for_timeout(wait_time)
+        
+        # 在截图前检查是否有加载指示器/进度条还在显示
+        loading_indicators_visible = await page.evaluate("""() => {
+            // 常见加载指示器的选择器
+            const selectors = [
+                '.loading', '.loader', '.spinner', '.progress', 
+                '[class*="loading"]', '[class*="loader"]', '[class*="spinner"]', 
+                '[id*="loading"]', '[id*="loader"]', '[id*="spinner"]'
+            ];
+            
+            // 检查是否有任何一个加载指示器可见
+            for (const selector of selectors) {
+                const elements = document.querySelectorAll(selector);
+                for (const el of elements) {
+                    if (el.offsetWidth > 0 && el.offsetHeight > 0 && 
+                        window.getComputedStyle(el).display !== 'none' && 
+                        window.getComputedStyle(el).visibility !== 'hidden') {
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        }""")
+        
+        if loading_indicators_visible:
+            logger.warning("页面上仍然显示加载指示器，等待额外2秒")
+            await page.wait_for_timeout(2000)
         
         # 获取页面元数据
         if get_metadata:
@@ -450,8 +549,15 @@ async def capture_url(
         success = await take_screenshot(page, str(screenshot_path), width, height, quality)
         metadata["success"] = success
         
+        # 验证截图内容
         if success:
-            logger.info(f"URL处理完成: {url}")
+            # 检查截图文件大小是否合理
+            file_size = os.path.getsize(screenshot_path)
+            if file_size < 10000:  # 小于10KB的截图可能有问题
+                logger.warning(f"截图文件很小 ({file_size} 字节)，可能表示截图不完整")
+                metadata["warning"] = "文件大小异常小，可能为空白截图"
+            else:
+                logger.info(f"URL处理完成: {url}, 截图大小: {file_size} 字节")
         else:
             logger.error(f"URL截图失败: {url}")
         
@@ -601,7 +707,7 @@ def ensure_content_loaded(page: Page):
                         }
                     }, 300);
                 });
-            }""", timeout=12000)  // 超时增加到12秒
+            }""", timeout=12000)  # 超时增加到12秒
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("所有图片资源加载完成")
         except Exception as e:
@@ -690,6 +796,7 @@ def capture_url_sync(
     user_agent: Optional[str] = None,
     network_timeout: int = 3,
     logger: Optional[logging.Logger] = None,
+    get_metadata: bool = True,
 ) -> dict:
     """
     访问URL并截取屏幕截图（同步版本）
@@ -705,6 +812,7 @@ def capture_url_sync(
         user_agent: 自定义User-Agent
         network_timeout: 网络空闲超时时间(秒)
         logger: 日志记录器
+        get_metadata: 是否获取页面元数据
         
     Returns:
         dict: 包含截图路径和状态的字典
@@ -780,18 +888,21 @@ def capture_url_sync(
                 if not response:
                     logger.error(f"无法加载页面: {url}")
                     metadata["error"] = "页面无响应"
+                    metadata["success"] = False
                     return metadata
                 
                 status_code = response.status
                 metadata["status_code"] = status_code
                 
+                # 添加状态码信息，但不设置error字段和success字段
+                # 仅记录状态码供参考，不影响截图成功与否的判断
                 if status_code >= 400:
                     if logger.isEnabledFor(logging.INFO):
-                        logger.info(f"页面返回错误状态码: {status_code}")
-                    metadata["error"] = f"HTTP错误: {status_code}"
+                        logger.info(f"页面返回状态码: {status_code}")
             except Exception as e:
                 logger.error(f"导航到URL时出错: {url} - {str(e)}")
                 metadata["error"] = f"导航错误: {str(e)}"
+                metadata["success"] = False
                 return metadata
             
             # 使用更有弹性的等待策略
@@ -897,13 +1008,29 @@ def capture_url_sync(
                     logger.debug(f"额外等待 {actual_wait_time} 秒")
                 time.sleep(actual_wait_time)
             
-            # 获取页面标题
-            try:
-                title = page.title()
-                metadata["title"] = title
-            except Exception as e:
+            # 获取页面元数据
+            if get_metadata:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"获取页面标题失败")
+                    logger.debug("收集元数据")
+                try:
+                    title = page.title()
+                    metadata["title"] = title
+                    
+                    # 获取页面描述
+                    description = page.evaluate("""() => {
+                        const meta = document.querySelector('meta[name="description"]');
+                        return meta ? meta.getAttribute('content') : '';
+                    }""")
+                    metadata["description"] = description
+                    
+                    # 获取favicon
+                    favicon = page.evaluate("""() => {
+                        const link = document.querySelector('link[rel="icon"], link[rel="shortcut icon"]');
+                        return link ? link.href : '';
+                    }""")
+                    metadata["favicon"] = favicon
+                except Exception as e:
+                    logger.warning(f"获取元数据失败: {str(e)}")
             
             # 截图
             try:
@@ -985,7 +1112,8 @@ def worker_process(args: dict) -> Dict[str, Any]:
             full_page=full_page,
             user_agent=user_agent,
             network_timeout=network_timeout,
-            logger=logger
+            logger=logger,
+            get_metadata=True
         )
         
         # 如果成功或者已经是最后一次重试，则返回结果
@@ -1116,7 +1244,7 @@ def capture_urls_parallel(
             progress_dict["completed"] = progress_dict["completed"] + 1
             
             # 根据结果更新成功/失败计数
-            if result.get("error"):
+            if result.get("success") is False or (result.get("error") and result.get("success") is not True):
                 progress_dict["failed"] = progress_dict.get("failed", 0) + 1
             else:
                 progress_dict["success"] = progress_dict.get("success", 0) + 1
@@ -1224,7 +1352,8 @@ def capture_urls_parallel(
                 url = urls[i]
                 truncated_url = truncate_url(url)
                 
-                if result.get("error"):
+                # 只有当结果包含error字段且success不为True时才视为截图失败
+                if result.get("success") is False or (result.get("error") and result.get("success") is not True):
                     logger.error(f"截图失败: {truncated_url} - {result.get('error')}")
                 else:
                     if logger.isEnabledFor(logging.DEBUG):

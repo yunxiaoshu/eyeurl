@@ -195,16 +195,16 @@ function updateLoadingStatus(message, status) {
 
 // 更新状态统计
 function updateStatusStats(data) {
-    // 成功URL数量（优先使用success标记，若不存在则判断状态码或无error）
+    // 成功URL数量（截图成功，无论状态码）
     const successCount = data.filter(item => 
-        item.success === true || 
-        ((item.status_code && item.status_code >= 200 && item.status_code < 300) && !item.error)
+        (item.success === true || (item.screenshot && !item.error))
     ).length;
     
-    // 错误URL数量（优先使用success标记，若不存在则判断状态码或有error）
+    // 错误URL数量（截图失败，即没有截图或有error）
     const errorCount = data.filter(item => 
-        item.success === false || 
-        (item.error && item.success !== true)
+        (item.success === false || 
+        (item.error && item.success !== true) || 
+        !item.screenshot)
     ).length;
     
     // 更新UI
@@ -616,15 +616,18 @@ function processData(data) {
         // 更新URL总数统计
         document.getElementById('total-urls').textContent = data.length;
         
-        // 计算成功和错误的URL数量 - 使用状态码判断而不是仅依赖success属性
-        // 成功URL数量（状态码2xx）
+        // 计算成功和错误的URL数量 - 基于截图成功与否，而非状态码
+        // 成功URL数量（截图成功）
         const successCount = data.filter(item => 
-            (item.status_code && item.status_code >= 200 && item.status_code < 300) || 
-            (item.success === true)
+            (item.success === true || (item.screenshot && !item.error))
         ).length;
         
-        // 错误URL数量
-        const errorCount = data.length - successCount;
+        // 错误URL数量（截图失败）
+        const errorCount = data.filter(item => 
+            (item.success === false || 
+            (item.error && item.success !== true) || 
+            !item.screenshot)
+        ).length;
         
         document.getElementById('success-count').textContent = successCount;
         document.getElementById('error-count').textContent = errorCount;

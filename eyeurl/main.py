@@ -417,8 +417,8 @@ def main():
             parallel_efficiency = (capture_time / total_processing_time) * 100 if total_processing_time > 0 else 0
             logger.info(f"平均每URL处理时间: {average_url_time:.2f}秒")
         
-        # 统计成功和失败数量
-        success_count = sum(1 for r in results if r.get("success") is True or (not r.get("error") and r.get("status_code", 0) >= 200 and r.get("status_code", 0) < 300))
+        # 统计成功和失败数量 - 基于截图成功与否，而非状态码
+        success_count = sum(1 for r in results if r.get("success") is True or (r.get("screenshot") and not r.get("error")))
         failed_count = sum(1 for r in results if r.get("success") is False or (r.get("error") and r.get("success") is not True))
         logger.info(f"截图结果: 成功={success_count}, 失败={failed_count}, 总计={len(results)}")
         
