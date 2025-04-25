@@ -33,8 +33,12 @@ const logger = {
 document.addEventListener('DOMContentLoaded', function() {
     logger.info("报告页面加载完成，开始初始化...");
     
-    // 设置所有事件监听器
-    setupEventListeners();
+    // 确保只初始化一次事件监听器
+    if (!window.eventsInitialized) {
+        // 设置所有事件监听器
+        setupEventListeners();
+        window.eventsInitialized = true;
+    }
     
     // 添加鼠标悬停图片动画效果
     try {
@@ -225,7 +229,7 @@ function updateStatusStats(data) {
         errorElement.textContent = errorCount;
         // 确保点击事件正常工作
         errorElement.addEventListener('click', function() {
-            filterByStatus('client-error');
+            filterByStatus('error');
             // 滚动到表格
             document.getElementById('results-table').scrollIntoView({ behavior: 'smooth' });
         });
@@ -1121,6 +1125,13 @@ function filterByStatus(statusFilter, recalculate = true) {
         if (recalculate) {
             filteredData = dataToFilter;
         }
+    } else if (statusFilter === 'error') {
+        // 特殊情况: 筛选出所有截图失败或超时的项目
+        filteredData = dataToFilter.filter(item => 
+            item.success === false || 
+            (item.error && item.success !== true) || 
+            !item.screenshot
+        );
     } else {
         // 根据状态码过滤
         filteredData = dataToFilter.filter(item => {
@@ -1187,7 +1198,11 @@ function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInput
     // 首页按钮
     const firstButton = document.getElementById(firstId);
     if (firstButton) {
-        firstButton.addEventListener('click', function() {
+        // 先移除所有现有的click事件监听器
+        const newFirstButton = firstButton.cloneNode(true);
+        firstButton.parentNode.replaceChild(newFirstButton, firstButton);
+        
+        newFirstButton.addEventListener('click', function() {
             if (currentPage > 1) {
                 currentPage = 1;
                 displayData(filteredData, currentPage);
@@ -1202,7 +1217,11 @@ function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInput
     // 前一页按钮
     const prevButton = document.getElementById(prevId);
     if (prevButton) {
-        prevButton.addEventListener('click', function() {
+        // 先移除所有现有的click事件监听器
+        const newPrevButton = prevButton.cloneNode(true);
+        prevButton.parentNode.replaceChild(newPrevButton, prevButton);
+        
+        newPrevButton.addEventListener('click', function() {
             if (currentPage > 1) {
                 currentPage--;
                 displayData(filteredData, currentPage);
@@ -1217,7 +1236,11 @@ function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInput
     // 下一页按钮
     const nextButton = document.getElementById(nextId);
     if (nextButton) {
-        nextButton.addEventListener('click', function() {
+        // 先移除所有现有的click事件监听器
+        const newNextButton = nextButton.cloneNode(true);
+        nextButton.parentNode.replaceChild(newNextButton, nextButton);
+        
+        newNextButton.addEventListener('click', function() {
             if (currentPage < totalPages) {
                 currentPage++;
                 displayData(filteredData, currentPage);
@@ -1232,7 +1255,11 @@ function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInput
     // 末页按钮
     const lastButton = document.getElementById(lastId);
     if (lastButton) {
-        lastButton.addEventListener('click', function() {
+        // 先移除所有现有的click事件监听器
+        const newLastButton = lastButton.cloneNode(true);
+        lastButton.parentNode.replaceChild(newLastButton, lastButton);
+        
+        newLastButton.addEventListener('click', function() {
             if (currentPage < totalPages) {
                 currentPage = totalPages;
                 displayData(filteredData, currentPage);
@@ -1249,14 +1276,22 @@ function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInput
     const pageInput = document.getElementById(pageInputId);
     
     if (goToPageButton && pageInput) {
-        goToPageButton.addEventListener('click', function() {
+        // 先移除所有现有的click事件监听器
+        const newGoToPageButton = goToPageButton.cloneNode(true);
+        goToPageButton.parentNode.replaceChild(newGoToPageButton, goToPageButton);
+        
+        newGoToPageButton.addEventListener('click', function() {
             goToSpecificPage(pageInput);
         });
         
+        // 清除并重新绑定输入框事件
+        const newPageInput = pageInput.cloneNode(true);
+        pageInput.parentNode.replaceChild(newPageInput, pageInput);
+        
         // 在输入框按下回车键也可跳转
-        pageInput.addEventListener('keypress', function(e) {
+        newPageInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                goToSpecificPage(pageInput);
+                goToSpecificPage(this);
             }
         });
     }
@@ -1265,7 +1300,7 @@ function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInput
 // 跳转到指定页
 function goToSpecificPage(pageInput) {
     const pageNumber = parseInt(pageInput.value);
-    if (!isNaN(pageNumber) && pageNumber >= 1 && pageNumber <= totalPages && pageNumber !== currentPage) {
+    if (!isNaN(pageNumber) && pageNumber >= 1 && pageNumber <= totalPages) {
         currentPage = pageNumber;
         displayData(filteredData, currentPage);
         updatePaginationControls();
