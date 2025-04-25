@@ -1281,7 +1281,8 @@ function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInput
         goToPageButton.parentNode.replaceChild(newGoToPageButton, goToPageButton);
         
         newGoToPageButton.addEventListener('click', function() {
-            goToSpecificPage(pageInput);
+            const input = document.getElementById(pageInputId);
+            goToSpecificPage(input);
         });
         
         // 清除并重新绑定输入框事件
@@ -1291,7 +1292,7 @@ function setupPaginationEventHandlers(firstId, prevId, nextId, lastId, pageInput
         // 在输入框按下回车键也可跳转
         newPageInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                goToSpecificPage(this);
+                goToSpecificPage(document.getElementById(pageInputId));
             }
         });
     }
