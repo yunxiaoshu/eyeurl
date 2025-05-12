@@ -25,6 +25,21 @@ class Config:
     user_agent: str
 
 
+# 获取配置的默认值，可以通过参数或环境变量覆盖
+DEFAULT_CONFIG = {
+    "width": 1280,         # 截图宽度
+    "height": 800,         # 截图高度
+    "timeout": 30,         # 页面加载超时时间(秒)
+    "wait_time": 0,        # 页面加载后额外等待时间(秒)
+    "threads": 4,          # 并行处理的线程数
+    "retry_count": 3,      # 默认重试次数，增加以处理网络错误
+    "network_timeout": 5,  # 网络空闲等待时间(秒)
+    "full_page": False,    # 是否截取整个页面
+    "user_agent": None,    # 自定义User-Agent
+    "ignore_ssl_errors": True,  # 默认忽略SSL证书错误
+}
+
+
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description="批量截图网页并生成报告")

@@ -14,37 +14,89 @@ from typing import List, Dict, Any, Optional
 import os
 import re
 import traceback
+import random
+import concurrent.futures
 
 from tqdm import tqdm
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
 
-def read_urls(file_path: str) -> List[str]:
-    """从文件中读取URL列表"""
-    logger = logging.getLogger("eyeurl")
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"正在打开URL文件: {file_path}")
+def read_urls(file_path, validate=True):
+    """
+    从文件中读取URL列表
     
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"成功读取文件，共 {len(lines)} 行")
+    Args:
+        file_path: URL文件路径
+        validate: 是否验证URL格式
+        
+    Returns:
+        URL列表
+    """
+    urls = []
+    # 尝试不同的编码打开文件
+    encodings = ['utf-8-sig', 'utf-8', 'gbk', 'latin1', 'utf-16', 'utf-16-le', 'utf-16-be']
+    success = False
+    
+    logging.debug(f"开始读取URL文件: {file_path}")
+    
+    for encoding in encodings:
+        try:
+            with open(file_path, 'r', encoding=encoding) as f:
+                content = f.read()
+                
+                # 删除BOM标记如果存在
+                if content.startswith('\ufeff'):
+                    content = content[1:]
+                if content.startswith('\ufffe'):
+                    content = content[1:]
+                if content.startswith('\ufeff\ufffe') or content.startswith('\ufffe\ufeff'):
+                    content = content[2:]
+                    
+                # 检查并清理UTF-16 BOM或不可见字符
+                content = re.sub(r'^\xfe\xff|^\xff\xfe|^\xef\xbb\xbf|\xfe\xff|\xff\xfe|\xef\xbb\xbf', '', content)
+                content = re.sub(r'ÿþ|þÿ|ï»¿', '', content)
+                
+                # 按行分割
+                lines = content.splitlines()
+                
+                for line in lines:
+                    # 跳过注释行和空行
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # 清理行中的引号和空白
+                    url = line.strip('\'"')
+                    
+                    # 进一步清理可能的不可见字符
+                    url = re.sub(r'[^\x20-\x7E]', '', url)
+                    
+                    # 验证和修复URL
+                    if validate:
+                        if not url.startswith(('http://', 'https://')):
+                            if url and not url.isspace():  # 确保URL不为空
+                                url = f"http://{url}"
+                                logging.warning(f"URL不以http://或https://开头，已自动添加http://: {url}")
+                    
+                    if url and not url.isspace():  # 最后检查确保URL不为空
+                        urls.append(url)
             
-            # 过滤注释和空行
-            urls = [line.strip() for line in lines if line.strip() and not line.startswith('#')]
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"过滤后有效URL: {len(urls)} 个")
-            
-            # 检查URL格式
-            for i, url in enumerate(urls):
-                if not (url.startswith('http://') or url.startswith('https://')):
-                    logger.warning(f"URL格式警告: 第 {i+1} 行URL不以http://或https://开头: {url}")
-                    # 我们不自动修改URL，只是提醒
-            
-            return urls
-    except Exception as e:
-        logger.error(f"读取URL文件失败: {str(e)}")
-        raise
+            success = True
+            logging.info(f"成功读取URL文件: {file_path}，使用编码: {encoding}，读取到{len(urls)}个URL")
+            break
+        except UnicodeDecodeError:
+            logging.debug(f"使用编码{encoding}读取文件失败，尝试其他编码")
+            continue
+        except Exception as e:
+            logging.error(f"读取URL文件时发生错误: {e}")
+            raise
+    
+    if not success:
+        raise UnicodeDecodeError("utf-8", b"", 0, 1, "无法使用任何已知编码读取文件")
+    
+    if not urls:
+        logging.warning(f"URL文件{file_path}中没有找到有效URL")
+    
+    return urls
 
 
 async def wait_for_render_complete(page, logger: logging.Logger, max_wait_time: int = 15, check_interval: float = 0.5) -> bool:
@@ -416,8 +468,19 @@ async def capture_url(
         # 创建浏览器实例
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("创建浏览器上下文")
-        browser = await sync_playwright().chromium.launch(**browser_config)
-        context = await browser.new_context(viewport={"width": width, "height": height})
+        # 确保browser_config不包含ignore_https_errors参数
+        browser_config_copy = browser_config.copy() if isinstance(browser_config, dict) else browser_config
+        if isinstance(browser_config_copy, dict) and 'ignore_https_errors' in browser_config_copy:
+            del browser_config_copy['ignore_https_errors']
+        browser = await sync_playwright().chromium.launch(**browser_config_copy)
+        context = await browser.new_context(
+            viewport={"width": width, "height": height},
+            # 减少内存使用，提高稳定性
+            has_touch=False,
+            java_script_enabled=True,
+            bypass_csp=True,  # 绕过内容安全策略
+            ignore_https_errors=True  # 在上下文中忽略SSL证书错误
+        )
         
         # 创建新页面
         if logger.isEnabledFor(logging.DEBUG):
@@ -823,6 +886,7 @@ def capture_url_sync(
     network_timeout: int = 3,
     logger: Optional[logging.Logger] = None,
     get_metadata: bool = True,
+    ignore_ssl_errors: bool = True,  # 添加忽略SSL证书错误选项
 ) -> dict:
     """
     访问URL并截取屏幕截图（同步版本）
@@ -839,6 +903,7 @@ def capture_url_sync(
         network_timeout: 网络空闲超时时间(秒)
         logger: 日志记录器
         get_metadata: 是否获取页面元数据
+        ignore_ssl_errors: 是否忽略SSL证书错误
         
     Returns:
         dict: 包含截图路径和状态的字典
@@ -878,7 +943,7 @@ def capture_url_sync(
             browser_options = {
                 "headless": True,
                 "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-                "timeout": timeout * 1000  # 设置浏览器启动超时
+                "timeout": timeout * 1000,  # 设置浏览器启动超时
             }
             
             # 添加自定义UA（如果提供）
@@ -893,7 +958,8 @@ def capture_url_sync(
                 # 减少内存使用，提高稳定性
                 has_touch=False,
                 java_script_enabled=True,
-                bypass_csp=True  # 绕过内容安全策略
+                bypass_csp=True,  # 绕过内容安全策略
+                ignore_https_errors=ignore_ssl_errors  # 在上下文中忽略SSL证书错误
             )
             
             # 创建新页面
@@ -944,8 +1010,28 @@ def capture_url_sync(
                     if logger.isEnabledFor(logging.INFO):
                         logger.info(f"页面返回状态码: {status_code}")
             except Exception as e:
-                logger.error(f"导航到URL时出错: {url} - {str(e)}")
-                metadata["error"] = f"导航错误: {str(e)}"
+                error_message = str(e)
+                # 特别处理连接被拒绝错误
+                if "ERR_CONNECTION_REFUSED" in error_message:
+                    logger.error(f"连接被拒绝: {url} - 服务器可能不可用或拒绝连接")
+                    metadata["error"] = "连接被拒绝：服务器不可用或拒绝连接"
+                    metadata["connection_error"] = "REFUSED"
+                elif "ERR_NAME_NOT_RESOLVED" in error_message:
+                    logger.error(f"域名解析失败: {url} - 域名可能不存在")
+                    metadata["error"] = "域名解析失败：域名可能不存在"
+                    metadata["connection_error"] = "DNS_FAILED"
+                elif "ERR_CONNECTION_TIMED_OUT" in error_message:
+                    logger.error(f"连接超时: {url} - 服务器响应时间过长")
+                    metadata["error"] = "连接超时：服务器响应时间过长"
+                    metadata["connection_error"] = "TIMEOUT"
+                elif "ERR_SSL_PROTOCOL_ERROR" in error_message:
+                    logger.error(f"SSL协议错误: {url} - SSL握手失败")
+                    metadata["error"] = "SSL协议错误：无法建立安全连接"
+                    metadata["connection_error"] = "SSL_ERROR"
+                else:
+                    logger.error(f"导航到URL时出错: {url} - {error_message}")
+                    metadata["error"] = f"导航错误: {error_message}"
+                
                 metadata["success"] = False
                 return metadata
             
@@ -1135,6 +1221,7 @@ def worker_process(args: dict) -> Dict[str, Any]:
     retry_count = args.get("retry_count", 1)
     network_timeout = args.get("network_timeout", 3)
     verbose = args.get("verbose", False)
+    ignore_ssl_errors = args.get("ignore_ssl_errors", True)  # 获取忽略SSL证书错误选项
     logger = args.get("logger")
     
     if logger is None:
@@ -1144,9 +1231,6 @@ def worker_process(args: dict) -> Dict[str, Any]:
     worker_id = args.get("worker_id", int(time.time() * 1000) % 10000)
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"[Worker-{worker_id}] 开始处理URL: {url}")
-    
-    # 改进重试机制 - 增加随机回退
-    import random
     
     # 实现重试机制
     for attempt in range(retry_count):
@@ -1165,8 +1249,28 @@ def worker_process(args: dict) -> Dict[str, Any]:
             user_agent=user_agent,
             network_timeout=network_timeout,
             logger=logger,
-            get_metadata=True
+            get_metadata=True,
+            ignore_ssl_errors=ignore_ssl_errors  # 传递忽略SSL证书错误选项
         )
+        
+        # 特别处理连接错误 - 增加更多重试机会
+        if result.get("connection_error") and attempt < retry_count - 1:
+            # 对网络连接错误使用指数退避策略
+            connection_error_type = result.get("connection_error")
+            # 针对不同类型的连接错误调整重试等待时间
+            if connection_error_type == "REFUSED":
+                # 连接被拒绝，可能需要稍长等待
+                retry_wait = 3 + attempt * 2 + random.uniform(1, 3)
+            elif connection_error_type == "TIMEOUT":  
+                # 连接超时，服务器可能繁忙
+                retry_wait = 5 + attempt * 2 + random.uniform(2, 5)
+            else:
+                # 其他连接错误
+                retry_wait = 2 + attempt + random.uniform(0.5, 2.0)
+                
+            logger.info(f"[Worker-{worker_id}] 遇到连接错误({connection_error_type})，将在 {retry_wait:.1f} 秒后重试: {url}")
+            time.sleep(retry_wait)
+            continue
         
         # 如果成功或者已经是最后一次重试，则返回结果
         if not result.get("error") or attempt == retry_count - 1:
@@ -1248,6 +1352,7 @@ def capture_urls_parallel(
     retry_count: int = 1,
     network_timeout: int = 3,
     verbose: bool = False,
+    ignore_ssl_errors: bool = True,  # 添加忽略SSL证书错误选项
     start_page: int = 1,
     end_page: int = None,
     page_size: int = None
@@ -1268,6 +1373,7 @@ def capture_urls_parallel(
         retry_count: 重试次数
         network_timeout: 网络空闲超时时间(秒)
         verbose: 是否详细输出
+        ignore_ssl_errors: 是否忽略SSL证书错误
         start_page: 从第几页开始处理，从1开始计数
         end_page: 处理到第几页结束，如果为None则处理到最后
         page_size: 每页大小，如果为None则所有URL视为一页
@@ -1326,7 +1432,8 @@ def capture_urls_parallel(
             "network_timeout": network_timeout,
             "verbose": verbose,
             "logger": logger,
-            "worker_id": i + 1  # 使用递增的worker_id
+            "worker_id": i + 1,  # 使用递增的worker_id
+            "ignore_ssl_errors": ignore_ssl_errors  # 传递忽略SSL证书错误选项
         }
         args_list.append(args)
     

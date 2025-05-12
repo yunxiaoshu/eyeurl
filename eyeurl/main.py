@@ -15,8 +15,13 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+# 添加父目录到sys.path
+sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+
+# 现在可以导入eyeurl模块
 from eyeurl.capture import read_urls, capture_urls_parallel
 from eyeurl.report import generate_report
+from eyeurl.config import DEFAULT_CONFIG
 
 # 定义控制台颜色和符号
 class ConsoleColors:
@@ -217,88 +222,62 @@ def setup_logging(log_level=None, log_dir=None):
 def parse_arguments():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="EyeURL - 高性能网页批量截图工具",
+        description='EyeURL - 高性能网页批量截图工具',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    parser.add_argument(
-        "-f", "--file", 
-        required=True,
-        help="包含URL列表的文本文件，每行一个URL"
-    )
+    # 必选参数
+    parser.add_argument('file', help='包含URL列表的文本文件路径')
     
-    parser.add_argument(
-        "-o", "--output", 
-        default="report",
-        help="输出目录，用于保存截图和报告"
-    )
+    # 可选参数
+    parser.add_argument('--output', '-o', dest='output', default='report',
+                        help='输出目录路径')
     
-    parser.add_argument(
-        "--width", 
-        type=int, 
-        default=1280,
-        help="浏览器窗口宽度"
-    )
+    parser.add_argument('--width', '-w', dest='width', type=int, 
+                        default=DEFAULT_CONFIG['width'],
+                        help='浏览器视窗宽度(像素)')
     
-    parser.add_argument(
-        "--height", 
-        type=int, 
-        default=800,
-        help="浏览器窗口高度"
-    )
+    parser.add_argument('--height', '-H', dest='height', type=int, 
+                        default=DEFAULT_CONFIG['height'],
+                        help='浏览器视窗高度(像素)')
     
-    parser.add_argument(
-        "--timeout", 
-        type=int, 
-        default=30,
-        help="页面加载超时时间（秒）"
-    )
+    parser.add_argument('--timeout', '-t', dest='timeout', type=int, 
+                        default=DEFAULT_CONFIG['timeout'],
+                        help='页面加载超时时间(秒)')
     
-    parser.add_argument(
-        "--network-timeout", 
-        type=int, 
-        default=3,
-        help="网络等待超时时间（秒），较小的值适用于复杂网页"
-    )
+    parser.add_argument('--network-timeout', '-n', dest='network_timeout', type=int, 
+                        default=DEFAULT_CONFIG['network_timeout'],
+                        help='网络活动停止等待时间(秒)')
     
-    parser.add_argument(
-        "--retry", 
-        type=int, 
-        default=1,
-        help="失败时重试次数"
-    )
+    parser.add_argument('--wait', '-W', dest='wait', type=float, 
+                        default=DEFAULT_CONFIG['wait_time'],
+                        help='页面加载后额外等待时间(秒)')
     
-    parser.add_argument(
-        "--wait", 
-        type=float, 
-        default=0,
-        help="页面加载后的额外等待时间（秒），可用于等待动态内容加载"
-    )
+    parser.add_argument('--threads', '-T', dest='threads', type=int, 
+                        default=DEFAULT_CONFIG['threads'],
+                        help='并行处理的线程数')
     
-    parser.add_argument(
-        "--threads", 
-        type=int, 
-        default=5,
-        help="并行处理的线程数"
-    )
+    parser.add_argument('--retry', '-r', dest='retry', type=int, 
+                        default=DEFAULT_CONFIG['retry_count'],
+                        help='失败后重试次数，特别是处理网络连接错误')
     
-    parser.add_argument(
-        "--full-page", 
-        action="store_true",
-        help="截取完整页面而非仅可见区域"
-    )
+    parser.add_argument('--full-page', '-f', dest='full_page', action='store_true',
+                        default=DEFAULT_CONFIG['full_page'],
+                        help='截取整个页面而非仅视窗大小(实验性)')
     
-    parser.add_argument(
-        "--user-agent", 
-        help="自定义User-Agent字符串"
-    )
+    parser.add_argument('--user-agent', '-u', dest='user_agent',
+                        default=DEFAULT_CONFIG['user_agent'],
+                        help='自定义User-Agent')
     
-    parser.add_argument(
-        "--verbose", 
-        action="store_true",
-        help="显示详细日志输出"
-    )
+    parser.add_argument('--ignore-ssl-errors', '-S', dest='ignore_ssl_errors',
+                        action='store_true',
+                        default=DEFAULT_CONFIG['ignore_ssl_errors'],
+                        help='忽略SSL证书错误，允许访问无效证书的网站')
     
+    parser.add_argument('--verbose', '-v', dest='verbose', 
+                        action='store_true', default=False,
+                        help='输出更详细的信息')
+
     return parser.parse_args()
 
 def main():
@@ -348,6 +327,7 @@ def main():
     logger.debug(f"  - 线程数量: {args.threads}个")
     logger.debug(f"  - 额外等待: {args.wait}秒")
     logger.debug(f"  - 全页面截图: {'是' if args.full_page else '否'}")
+    logger.debug(f"  - 忽略SSL错误: {'是' if args.ignore_ssl_errors else '否'}")
     if args.user_agent:
         logger.debug(f"  - 自定义UA: {args.user_agent}")
     logger.debug(f"  - 详细日志: {'是' if args.verbose else '否'}")
@@ -394,7 +374,8 @@ def main():
             logger=logger,
             retry_count=args.retry,
             network_timeout=args.network_timeout,
-            verbose=args.verbose
+            verbose=args.verbose,
+            ignore_ssl_errors=args.ignore_ssl_errors
         )
         capture_end = time.time()
         
