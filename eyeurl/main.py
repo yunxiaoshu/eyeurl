@@ -185,8 +185,8 @@ def setup_logging(log_level=None, log_dir=None):
     # 为控制台处理器添加过滤器
     console_handler.addFilter(WarningFilter(filter_phrases))
     
-    # 设置控制台处理器级别 - 确保控制台只显示INFO及以上级别
-    console_handler.setLevel(max(numeric_level, logging.INFO))
+    # 设置控制台处理器级别 - 确保控制台只显示WARNING及以上级别
+    console_handler.setLevel(max(numeric_level, logging.WARNING))
     
     # 创建格式化器
     console_format = ColoredFormatter()
