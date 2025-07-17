@@ -20,6 +20,13 @@ EyeURL - 网页批量截图工具
     --full-page           截取完整页面而非仅可见区域
     --user-agent          自定义User-Agent字符串
 
+功能特性:
+    - 自动检测URL可访问性，只对可访问的URL进行截图
+    - 将不可访问的URL及原因记录到inaccessible_urls.txt文件
+    - 只有连接超时和连接错误的URL被视为不可访问，其他状态码(包括404、403、500等)都会进行截图
+    - 多线程并行处理，提高效率
+    - 生成美观的HTML报告
+
 示例:
     python eyeurl.py -f testurl.txt --threads 5 --wait 3 --full-page
     python eyeurl.py -f sites.txt --timeout 60 --network-timeout 5 --retry 2

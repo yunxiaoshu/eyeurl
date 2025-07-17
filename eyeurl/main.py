@@ -12,8 +12,11 @@ import time
 import json
 import logging
 import argparse
+import requests
+import concurrent.futures
 from pathlib import Path
 from datetime import datetime
+from tqdm import tqdm
 
 # 添加父目录到sys.path
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
@@ -280,6 +283,121 @@ def parse_arguments():
 
     return parser.parse_args()
 
+def check_urls_availability(urls, timeout=5, threads=10, logger=None):
+    """
+    检测URL的可访问性
+    
+    Args:
+        urls: URL列表
+        timeout: 请求超时时间(秒)
+        threads: 并行线程数
+        logger: 日志记录器
+        
+    Returns:
+        tuple: (可访问的URL列表, 不可访问的URL及原因字典)
+    """
+    if logger is None:
+        logger = logging.getLogger("eyeurl")
+    
+    logger.info(f"开始检测 {len(urls)} 个URL的可访问性")
+    
+    accessible_urls = []
+    inaccessible_urls = {}
+    
+    # 使用线程池并行检测URL
+    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+        # 创建URL检测任务
+        future_to_url = {executor.submit(check_url_availability, url, timeout): url for url in urls}
+        
+        # 使用tqdm显示进度条
+        with tqdm(total=len(urls), desc="检测URL可访问性", unit="URL") as pbar:
+            for future in concurrent.futures.as_completed(future_to_url):
+                url = future_to_url[future]
+                pbar.update(1)
+                
+                try:
+                    is_accessible, error_reason = future.result()
+                    if is_accessible:
+                        accessible_urls.append(url)
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"URL可访问: {url}")
+                    else:
+                        inaccessible_urls[url] = error_reason
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"URL不可访问: {url}, 原因: {error_reason}")
+                except Exception as e:
+                    inaccessible_urls[url] = f"检测过程出错: {str(e)}"
+                    logger.error(f"检测URL时出错: {url}, 错误: {str(e)}")
+    
+    # 统计结果
+    logger.info(f"URL可访问性检测完成: 可访问 {len(accessible_urls)}/{len(urls)}, 不可访问 {len(inaccessible_urls)}/{len(urls)}")
+    
+    return accessible_urls, inaccessible_urls
+
+def check_url_availability(url, timeout=5):
+    """
+    检测单个URL是否可访问
+    
+    Args:
+        url: 要检测的URL
+        timeout: 请求超时时间(秒)
+        
+    Returns:
+        tuple: (是否可访问, 错误原因)
+    """
+    try:
+        # 只发送HEAD请求，减少数据传输
+        response = requests.head(
+            url, 
+            timeout=timeout, 
+            allow_redirects=True,
+            headers={'User-Agent': 'EyeURL-Checker/1.0'}
+        )
+        
+        # 修改判断逻辑：只要能获取到HTTP状态码，就认为是可访问的
+        # 即使是404、403、500等错误状态码，也认为是可访问的，需要截图
+        return True, None
+            
+    except requests.exceptions.Timeout:
+        return False, "请求超时"
+    except requests.exceptions.ConnectionError:
+        return False, "连接错误"
+    except requests.exceptions.TooManyRedirects:
+        # 重定向过多也视为可访问，只是有重定向问题
+        return True, "重定向过多(但仍将截图)"
+    except requests.exceptions.SSLError:
+        # SSL证书错误也视为可访问，只是有SSL问题
+        return True, "SSL证书错误(但仍将截图)"
+    except requests.exceptions.InvalidURL:
+        return False, "无效的URL"
+    except requests.exceptions.RequestException as e:
+        # 其他请求异常视为不可访问
+        return False, f"请求异常: {str(e)}"
+    except Exception as e:
+        return False, f"未知错误: {str(e)}"
+
+def save_inaccessible_urls(inaccessible_urls, output_dir):
+    """
+    保存不可访问的URL及原因到文件
+    
+    Args:
+        inaccessible_urls: 不可访问的URL及原因字典
+        output_dir: 输出目录
+        
+    Returns:
+        str: 保存的文件路径
+    """
+    error_file = output_dir / "inaccessible_urls.txt"
+    
+    with open(error_file, 'w', encoding='utf-8') as f:
+        f.write(f"# 不可访问的URL列表 - 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"# 总计: {len(inaccessible_urls)} 个URL\n\n")
+        
+        for url, reason in inaccessible_urls.items():
+            f.write(f"{url}\t{reason}\n")
+    
+    return str(error_file)
+
 def main():
     """主程序入口"""
     start_time = time.time()
@@ -353,16 +471,37 @@ def main():
             if len(urls) > 6:
                 logger.debug(f"    - ... 及其他 {len(urls) - 6} 个URL")
         
+        # 新增阶段：检测URL可访问性
+        logger.info(f"{Symbols.PHASE} 阶段2: 检测URL可访问性 - 开始")
+        
+        # 检测URL可访问性
+        availability_start = time.time()
+        accessible_urls, inaccessible_urls = check_urls_availability(
+            urls=urls,
+            timeout=args.network_timeout,  # 使用网络超时参数
+            threads=args.threads,  # 使用线程数参数
+            logger=logger
+        )
+        availability_end = time.time()
+        
+        # 记录可访问性检测完成的日志
+        logger.info(f"{Symbols.PHASE} 阶段2: 检测URL可访问性 - 完成 ({availability_end - availability_start:.2f}秒)")
+        
+        # 保存不可访问的URL到文件
+        if inaccessible_urls:
+            error_file = save_inaccessible_urls(inaccessible_urls, output_dir)
+            logger.info(f"已将 {len(inaccessible_urls)} 个不可访问的URL保存到: {error_file}")
+        
         # 分隔线
-        print(f"\n{ConsoleColors.BLUE}{Symbols.HOURGLASS} 开始处理 - 共 {len(urls)} 个URL{ConsoleColors.ENDC}\n")
+        print(f"\n{ConsoleColors.BLUE}{Symbols.HOURGLASS} 开始处理 - 共 {len(accessible_urls)} 个可访问URL{ConsoleColors.ENDC}\n")
         
         # 记录开始执行截图
-        logger.info(f"{Symbols.PHASE} 阶段2: 执行批量截图 - 开始")
+        logger.info(f"{Symbols.PHASE} 阶段3: 执行批量截图 - 开始")
         
-        # 执行批量截图
+        # 执行批量截图 - 只处理可访问的URL
         capture_start = time.time()
         results = capture_urls_parallel(
-            urls=urls,
+            urls=accessible_urls,  # 只处理可访问的URL
             screenshots_dir=screenshots_dir,
             timeout=args.timeout,
             width=args.width,
@@ -381,7 +520,7 @@ def main():
         
         # 记录截图完成的日志
         capture_time = capture_end - capture_start
-        logger.info(f"{Symbols.PHASE} 阶段2: 执行批量截图 - 完成 ({capture_time:.2f}秒)")
+        logger.info(f"{Symbols.PHASE} 阶段3: 执行批量截图 - 完成 ({capture_time:.2f}秒)")
         
         # 使用results中的batch_info来获取实际的平均处理时间
         if results and len(results) > 0 and "meta_data" in results[0] and "batch_info" in results[0]["meta_data"]:
@@ -407,7 +546,7 @@ def main():
         print(f"\n{ConsoleColors.BLUE}{Symbols.FINISH} 处理完成{ConsoleColors.ENDC}")
         
         # 记录开始生成报告
-        logger.info(f"{Symbols.PHASE} 阶段3: 生成结果报告 - 开始")
+        logger.info(f"{Symbols.PHASE} 阶段4: 生成结果报告 - 开始")
         
         # 保存结果到JSON文件
         results_file = output_dir / "data.json"
@@ -421,7 +560,7 @@ def main():
         report_end = time.time()
         
         # 记录报告生成完成 - 精简输出，避免重复
-        logger.info(f"{Symbols.PHASE} 阶段3: 生成结果报告 - 完成 ({report_end - report_start:.2f}秒)")
+        logger.info(f"{Symbols.PHASE} 阶段4: 生成结果报告 - 完成 ({report_end - report_start:.2f}秒)")
         # 统计成功/失败率
         success_rate = success_count/len(results)*100
         logger.info(f"{Symbols.FILE} 报告统计: {len(results)}个URL, 成功率: {success_rate:.1f}%")
@@ -448,9 +587,12 @@ def main():
         
         # 结果统计
         print(f"\n{ConsoleColors.CYAN}{ConsoleColors.BOLD}{'='*30} 任务统计 {'='*30}{ConsoleColors.ENDC}")
-        print(f"{ConsoleColors.GREEN}{Symbols.SUCCESS} 成功截图: {success_count}/{len(urls)}{ConsoleColors.ENDC}")
+        print(f"{ConsoleColors.YELLOW}{Symbols.INFO} 总URL数: {len(urls)}{ConsoleColors.ENDC}")
+        print(f"{ConsoleColors.BLUE}{Symbols.URL} 可访问URL: {len(accessible_urls)}/{len(urls)}{ConsoleColors.ENDC}")
+        print(f"{ConsoleColors.RED}{Symbols.ERROR} 不可访问URL: {len(inaccessible_urls)}/{len(urls)}{ConsoleColors.ENDC}")
+        print(f"{ConsoleColors.GREEN}{Symbols.SUCCESS} 成功截图: {success_count}/{len(accessible_urls)}{ConsoleColors.ENDC}")
         if failed_count > 0:
-            print(f"{ConsoleColors.RED}{Symbols.ERROR} 失败截图: {failed_count}/{len(urls)}{ConsoleColors.ENDC}")
+            print(f"{ConsoleColors.RED}{Symbols.ERROR} 失败截图: {failed_count}/{len(accessible_urls)}{ConsoleColors.ENDC}")
         print(f"{ConsoleColors.YELLOW}{Symbols.TIME} 总耗时: {elapsed_time:.2f} 秒{ConsoleColors.ENDC}")
         print(f"{ConsoleColors.YELLOW}{Symbols.TIME} 平均处理时间: {average_url_time:.2f} 秒/URL{ConsoleColors.ENDC}")
         print(f"{ConsoleColors.YELLOW}{Symbols.TIME} 并行效率: {parallel_efficiency:.2f}%{ConsoleColors.ENDC}")
@@ -459,10 +601,13 @@ def main():
         # 将详细统计信息保留在DEBUG级别，减少日志输出
         logger.debug(f"{Symbols.FINISH} 详细统计信息:")
         logger.debug(f"  - URL总数: {len(urls)}")
+        logger.debug(f"  - 可访问URL: {len(accessible_urls)}")
+        logger.debug(f"  - 不可访问URL: {len(inaccessible_urls)}")
         logger.debug(f"  - 成功截图: {success_count}")
         logger.debug(f"  - 失败截图: {failed_count}")
-        logger.debug(f"  - 成功率: {(success_count/len(urls)*100):.1f}%")
+        logger.debug(f"  - 成功率: {(success_count/len(accessible_urls)*100):.1f}%")
         logger.debug(f"  - 读取URLs时间: {end_read - start_read:.2f}秒")
+        logger.debug(f"  - URL可访问性检测时间: {availability_end - availability_start:.2f}秒")
         logger.debug(f"  - 截图处理时间: {capture_time:.2f}秒")
         logger.debug(f"  - 理论串行时间: {theoretical_serial_time:.2f}秒")
         logger.debug(f"  - 平均每URL处理时间: {average_url_time:.2f}秒")
@@ -474,6 +619,7 @@ def main():
         logger.debug(f"  - JSON数据: {results_file}")
         logger.debug(f"  - HTML报告: {report_file}")
         logger.debug(f"  - 截图目录: {screenshots_dir}")
+        logger.debug(f"  - 错误URL文件: {output_dir / 'inaccessible_urls.txt'}")
         logger.debug(f"  - 日志目录: {output_dir / 'logs'}")
         
         return 0
