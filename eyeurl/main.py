@@ -14,6 +14,8 @@ import logging
 import argparse
 import requests
 import concurrent.futures
+import asyncio
+import aiohttp  # 添加aiohttp库导入
 from pathlib import Path
 from datetime import datetime
 from tqdm import tqdm
@@ -249,7 +251,7 @@ def parse_arguments():
                         help='页面加载超时时间(秒)')
     
     parser.add_argument('--network-timeout', '-n', dest='network_timeout', type=int, 
-                        default=DEFAULT_CONFIG['network_timeout'],
+                        default=10,  # 修改默认网络超时为10秒
                         help='网络活动停止等待时间(秒)')
     
     parser.add_argument('--wait', '-W', dest='wait', type=float, 
@@ -257,11 +259,11 @@ def parse_arguments():
                         help='页面加载后额外等待时间(秒)')
     
     parser.add_argument('--threads', '-T', dest='threads', type=int, 
-                        default=DEFAULT_CONFIG['threads'],
+                        default=10,  # 修改默认线程数为10
                         help='并行处理的线程数')
     
     parser.add_argument('--retry', '-r', dest='retry', type=int, 
-                        default=DEFAULT_CONFIG['retry_count'],
+                        default=3,  # 修改默认重试次数为3
                         help='失败后重试次数，特别是处理网络连接错误')
     
     parser.add_argument('--full-page', '-f', dest='full_page', action='store_true',
@@ -283,14 +285,143 @@ def parse_arguments():
 
     return parser.parse_args()
 
-def check_urls_availability(urls, timeout=5, threads=10, logger=None):
+async def check_url_availability_async(url, timeout=10, retry=0, user_agent=None):
+    """
+    异步检测单个URL是否可访问，模仿Java HttpURLConnection的行为
+    
+    Args:
+        url: 要检测的URL
+        timeout: 请求超时时间(秒)
+        retry: 重试次数(默认0，不重试)
+        user_agent: 自定义User-Agent
+        
+    Returns:
+        tuple: (是否可访问, 错误原因)
+    """
+    # 规范化URL
+    if not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
+    
+    headers = {
+        'User-Agent': user_agent if user_agent else 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }
+    
+    # 创建更短的超时时间，加快检测速度
+    timeout_obj = aiohttp.ClientTimeout(
+        total=5,  # 总超时5秒，与Java代码一致
+        connect=5,  # 连接超时5秒
+        sock_connect=5,  # Socket连接超时5秒
+        sock_read=5  # 读取超时5秒
+    )
+    
+    try:
+        # 创建TCP连接器，完全禁用SSL验证
+        connector = aiohttp.TCPConnector(
+            ssl=False,  # 完全禁用SSL验证
+            force_close=True,  # 强制关闭连接
+            limit=0  # 无限制连接数
+        )
+        
+        # 使用HEAD请求，只检查连接而不获取内容
+        async with aiohttp.ClientSession(
+            timeout=timeout_obj,
+            connector=connector
+        ) as session:
+            try:
+                # 尝试HEAD请求，如果服务器不支持HEAD，会抛出异常
+                async with session.head(
+                    url, 
+                    headers=headers,
+                    allow_redirects=True,
+                    raise_for_status=False
+                ) as response:
+                    # 只要能获取到响应，就认为URL可访问
+                    return True, None
+            except:
+                # 如果HEAD失败，尝试GET请求但不读取响应体
+                try:
+                    async with session.get(
+                        url, 
+                        headers=headers,
+                        allow_redirects=True,
+                        read_until_eof=False,
+                        raise_for_status=False
+                    ) as response:
+                        # 只要能获取到响应，就认为URL可访问
+                        return True, None
+                except:
+                    # 如果原始URL失败，尝试切换协议
+                    if url.startswith('https://'):
+                        alt_url = url.replace('https://', 'http://', 1)
+                    else:
+                        alt_url = url.replace('http://', 'https://', 1)
+                    
+                    try:
+                        async with session.get(
+                            alt_url, 
+                            headers=headers,
+                            allow_redirects=True,
+                            read_until_eof=False,
+                            raise_for_status=False
+                        ) as response:
+                            # 如果替代URL成功，返回成功
+                            return True, "使用替代协议访问成功"
+                    except:
+                        # 两种协议都失败，继续处理外层异常
+                        raise
+    except aiohttp.ClientSSLError:
+        # 与Java代码一致，SSL错误也视为可访问
+        return True, "SSL证书错误(但仍将截图)"
+    except aiohttp.TooManyRedirects:
+        # 重定向过多也视为可访问
+        return True, "重定向过多(但仍将截图)"
+    except (aiohttp.ClientConnectorError, asyncio.TimeoutError, aiohttp.InvalidURL, Exception):
+        # 所有其他错误都视为不可访问，与Java代码一致
+        return False, "连接错误或超时"
+
+async def check_urls_batch_async(urls, timeout=10, retry=0, user_agent=None, pbar=None):
+    """
+    异步批量检测URL
+    
+    Args:
+        urls: URL列表
+        timeout: 请求超时时间(秒)
+        retry: 重试次数
+        user_agent: 自定义User-Agent
+        pbar: 进度条对象
+        
+    Returns:
+        list of tuples: [(url, is_accessible, error_reason), ...]
+    """
+    # 创建所有URL的任务
+    tasks = []
+    for url in urls:
+        tasks.append(asyncio.create_task(check_url_availability_async(url, timeout, retry, user_agent)))
+    
+    # 等待所有任务完成
+    results = []
+    for i, url in enumerate(urls):
+        try:
+            is_accessible, error_reason = await tasks[i]
+            results.append((url, is_accessible, error_reason))
+        except Exception as e:
+            results.append((url, False, f"任务执行错误: {str(e)}"))
+        
+        if pbar:
+            pbar.update(1)
+    
+    return results
+
+def check_urls_availability(urls, timeout=10, threads=50, retry=0, user_agent=None, logger=None):
     """
     检测URL的可访问性
     
     Args:
         urls: URL列表
         timeout: 请求超时时间(秒)
-        threads: 并行线程数
+        threads: 并发任务数
+        retry: 重试次数
+        user_agent: 自定义User-Agent
         logger: 日志记录器
         
     Returns:
@@ -304,77 +435,51 @@ def check_urls_availability(urls, timeout=5, threads=10, logger=None):
     accessible_urls = []
     inaccessible_urls = {}
     
-    # 使用线程池并行检测URL
-    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-        # 创建URL检测任务
-        future_to_url = {executor.submit(check_url_availability, url, timeout): url for url in urls}
+    # 使用asyncio运行异步检测任务
+    async def main_async():
+        # 将URL列表分成批次处理，每批次的大小为线程数
+        batch_size = min(threads, 50)  # 限制最大批次大小为50
         
-        # 使用tqdm显示进度条
+        batches = [urls[i:i + batch_size] for i in range(0, len(urls), batch_size)]
+        
+        results = []
         with tqdm(total=len(urls), desc="检测URL可访问性", unit="URL") as pbar:
-            for future in concurrent.futures.as_completed(future_to_url):
-                url = future_to_url[future]
-                pbar.update(1)
-                
-                try:
-                    is_accessible, error_reason = future.result()
-                    if is_accessible:
-                        accessible_urls.append(url)
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"URL可访问: {url}")
-                    else:
-                        inaccessible_urls[url] = error_reason
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"URL不可访问: {url}, 原因: {error_reason}")
-                except Exception as e:
-                    inaccessible_urls[url] = f"检测过程出错: {str(e)}"
-                    logger.error(f"检测URL时出错: {url}, 错误: {str(e)}")
+            for batch in batches:
+                batch_results = await check_urls_batch_async(
+                    urls=batch,
+                    timeout=timeout,
+                    retry=retry,
+                    user_agent=user_agent,
+                    pbar=pbar
+                )
+                results.extend(batch_results)
+        
+        return results
+    
+    # 根据平台选择适当的事件循环运行方式
+    if sys.platform == 'win32':
+        # Windows平台使用这种方式
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        results = asyncio.run(main_async())
+    else:
+        # 其他平台使用默认方式
+        results = asyncio.run(main_async())
+    
+    # 处理结果
+    for url, is_accessible, error_reason in results:
+        if is_accessible:
+            accessible_urls.append(url)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"URL可访问: {url}")
+        else:
+            inaccessible_urls[url] = error_reason
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"URL不可访问: {url}, 原因: {error_reason}")
     
     # 统计结果
     logger.info(f"URL可访问性检测完成: 可访问 {len(accessible_urls)}/{len(urls)}, 不可访问 {len(inaccessible_urls)}/{len(urls)}")
     
     return accessible_urls, inaccessible_urls
-
-def check_url_availability(url, timeout=5):
-    """
-    检测单个URL是否可访问
-    
-    Args:
-        url: 要检测的URL
-        timeout: 请求超时时间(秒)
-        
-    Returns:
-        tuple: (是否可访问, 错误原因)
-    """
-    try:
-        # 只发送HEAD请求，减少数据传输
-        response = requests.head(
-            url, 
-            timeout=timeout, 
-            allow_redirects=True,
-            headers={'User-Agent': 'EyeURL-Checker/1.0'}
-        )
-        
-        # 修改判断逻辑：只要能获取到HTTP状态码，就认为是可访问的
-        # 即使是404、403、500等错误状态码，也认为是可访问的，需要截图
-        return True, None
-            
-    except requests.exceptions.Timeout:
-        return False, "请求超时"
-    except requests.exceptions.ConnectionError:
-        return False, "连接错误"
-    except requests.exceptions.TooManyRedirects:
-        # 重定向过多也视为可访问，只是有重定向问题
-        return True, "重定向过多(但仍将截图)"
-    except requests.exceptions.SSLError:
-        # SSL证书错误也视为可访问，只是有SSL问题
-        return True, "SSL证书错误(但仍将截图)"
-    except requests.exceptions.InvalidURL:
-        return False, "无效的URL"
-    except requests.exceptions.RequestException as e:
-        # 其他请求异常视为不可访问
-        return False, f"请求异常: {str(e)}"
-    except Exception as e:
-        return False, f"未知错误: {str(e)}"
 
 def save_inaccessible_urls(inaccessible_urls, output_dir):
     """
@@ -474,12 +579,14 @@ def main():
         # 新增阶段：检测URL可访问性
         logger.info(f"{Symbols.PHASE} 阶段2: 检测URL可访问性 - 开始")
         
-        # 检测URL可访问性
+        # 检测URL可访问性 - 使用新的参数
         availability_start = time.time()
         accessible_urls, inaccessible_urls = check_urls_availability(
             urls=urls,
-            timeout=args.network_timeout,  # 使用网络超时参数
-            threads=args.threads,  # 使用线程数参数
+            timeout=5,  # 使用更短的超时时间，提高效率
+            threads=50,  # 使用更高的并发数
+            retry=0,  # 不进行重试，提高效率
+            user_agent=args.user_agent,  # 使用自定义UA
             logger=logger
         )
         availability_end = time.time()
@@ -495,6 +602,25 @@ def main():
         # 分隔线
         print(f"\n{ConsoleColors.BLUE}{Symbols.HOURGLASS} 开始处理 - 共 {len(accessible_urls)} 个可访问URL{ConsoleColors.ENDC}\n")
         
+        # 如果没有可访问的URL，则提前结束
+        if not accessible_urls:
+            logger.warning(f"{Symbols.WARNING} 没有可访问的URL，跳过截图和报告阶段")
+            print(f"\n{ConsoleColors.YELLOW}{Symbols.WARNING} 没有可访问的URL，任务结束{ConsoleColors.ENDC}\n")
+            
+            # 计算总耗时
+            elapsed_time = time.time() - start_time
+            logger.info(f"{Symbols.END} 任务完成，总耗时: {elapsed_time:.2f} 秒")
+            
+            # 结果统计
+            print(f"\n{ConsoleColors.CYAN}{ConsoleColors.BOLD}{'='*30} 任务统计 {'='*30}{ConsoleColors.ENDC}")
+            print(f"{ConsoleColors.YELLOW}{Symbols.INFO} 总URL数: {len(urls)}{ConsoleColors.ENDC}")
+            print(f"{ConsoleColors.BLUE}{Symbols.URL} 可访问URL: {len(accessible_urls)}/{len(urls)}{ConsoleColors.ENDC}")
+            print(f"{ConsoleColors.RED}{Symbols.ERROR} 不可访问URL: {len(inaccessible_urls)}/{len(urls)}{ConsoleColors.ENDC}")
+            print(f"{ConsoleColors.YELLOW}{Symbols.TIME} 总耗时: {elapsed_time:.2f} 秒{ConsoleColors.ENDC}")
+            print(f"{ConsoleColors.CYAN}{ConsoleColors.BOLD}{'='*60}{ConsoleColors.ENDC}\n")
+            
+            return 0
+            
         # 记录开始执行截图
         logger.info(f"{Symbols.PHASE} 阶段3: 执行批量截图 - 开始")
         
@@ -562,7 +688,7 @@ def main():
         # 记录报告生成完成 - 精简输出，避免重复
         logger.info(f"{Symbols.PHASE} 阶段4: 生成结果报告 - 完成 ({report_end - report_start:.2f}秒)")
         # 统计成功/失败率
-        success_rate = success_count/len(results)*100
+        success_rate = success_count/len(results)*100 if results else 0
         logger.info(f"{Symbols.FILE} 报告统计: {len(results)}个URL, 成功率: {success_rate:.1f}%")
         # 输出文件路径 - 合并为一条信息
         logger.info(f"{Symbols.FILE} 报告路径: {report_file}")
@@ -605,7 +731,7 @@ def main():
         logger.debug(f"  - 不可访问URL: {len(inaccessible_urls)}")
         logger.debug(f"  - 成功截图: {success_count}")
         logger.debug(f"  - 失败截图: {failed_count}")
-        logger.debug(f"  - 成功率: {(success_count/len(accessible_urls)*100):.1f}%")
+        logger.debug(f"  - 成功率: {(success_count/len(accessible_urls)*100):.1f}%" if accessible_urls else "0.0%")
         logger.debug(f"  - 读取URLs时间: {end_read - start_read:.2f}秒")
         logger.debug(f"  - URL可访问性检测时间: {availability_end - availability_start:.2f}秒")
         logger.debug(f"  - 截图处理时间: {capture_time:.2f}秒")

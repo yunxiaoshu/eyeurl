@@ -1029,7 +1029,9 @@ def capture_url_sync(
                     metadata["error"] = "SSL协议错误：无法建立安全连接"
                     metadata["connection_error"] = "SSL_ERROR"
                 else:
-                    logger.error(f"导航到URL时出错: {url} - {error_message}")
+                    # 将错误日志级别从error改为debug，避免在控制台输出
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"导航到URL时出错: {url} - {error_message}")
                     metadata["error"] = f"导航错误: {error_message}"
                 
                 metadata["success"] = False
